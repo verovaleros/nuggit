@@ -1,5 +1,7 @@
 import argparse
 import logging
+import sys
+from util.github import validate_repo_url
 
 
 def setup_logging(log_file, log_level):
@@ -54,6 +56,10 @@ def main():
     args = parser.parse_args()
 
     setup_logging(args.log_file, args.log_level)
+
+    if not validate_repo_url(args.repo):
+        logging.error(f"Invalid repository URL: {args.repo}")
+        sys.exit(1)
 
     logging.info(f"Starting analysis of repository: {args.repo}")
 
