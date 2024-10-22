@@ -49,6 +49,7 @@ def get_repo_info(repo_owner, repo_name, token=None):
 
     try:
         repo = gh.get_repo(f"{repo_owner}/{repo_name}")
+
         repo_info = {
             'Tool': repo.name,
             'Owner': repo.owner.login,
@@ -60,6 +61,8 @@ def get_repo_info(repo_owner, repo_name, token=None):
             'Latest Release': get_repo_latest_release(repo),
             'License': get_repo_license(repo),
             'Topics': get_repo_topics(repo),
+            'Contributors': repo.get_contributors().totalCount,
+            'Commits': repo.get_commits().totalCount,
         }
         return repo_info
     except GithubException as e:
