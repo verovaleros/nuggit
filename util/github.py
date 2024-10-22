@@ -11,6 +11,17 @@ def validate_repo_url(repo_url):
         return False
     return match.groups() 
 
+def get_repo_license(repo):
+    try:
+        license_info = repo.get_license()
+        if license_info:
+            return license_info.license.name
+        else:
+            return "No license"
+    except GithubException:
+        return "No license"
+
+
 def get_repo_info(repo_owner, repo_name, token=None):
     # Authenticate with GitHub
     gh = Github(token) if token else Github()
