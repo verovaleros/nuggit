@@ -1,2 +1,24 @@
-# nuggit
-Small bits of insights from GitHub repositories
+# Nuggit: Small bits of insights from GitHub repositories
+
+Nuggit is a Python tool that creates an index-card like summary of a GitHub repository.
+
+<img width="800" alt="image" src="https://github.com/user-attachments/assets/719a880e-91b2-457b-a598-c9c9f9947d47">
+
+## Usage
+```python
+~:$ python3 nuggit.py --help
+usage: nuggit.py [-h] -r REPO [-l LOG_FILE] [-d] [-v]
+
+Nuggit: Small bits of big insights from GitHub repositories
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -r REPO, --repo REPO  URL of the GitHub repository to analyze.
+  -l LOG_FILE, --log_file LOG_FILE
+                        Log file name (default: nuggit.log)
+  -d, --debug           Extra verbose for debugging.
+  -v, --verbose         Be verbose```
+```
+
+## About
+This tool was created by verovaleros on October 2024. GNU General Public License v2.0.
