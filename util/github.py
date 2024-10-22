@@ -35,6 +35,14 @@ def get_repo_license(repo):
         return "No license"
 
 
+def get_repo_topics(repo):
+    try:
+        topics = repo.get_topics()
+        return topics
+    except GithubException as e:
+        return []
+
+
 def get_repo_info(repo_owner, repo_name, token=None):
     # Authenticate with GitHub
     gh = Github(token) if token else Github()
@@ -51,6 +59,7 @@ def get_repo_info(repo_owner, repo_name, token=None):
             'Issues': repo.open_issues_count,
             'Latest Release': get_repo_latest_release(repo),
             'License': get_repo_license(repo),
+            'Topics': get_repo_topics(repo),
         }
         return repo_info
     except GithubException as e:
