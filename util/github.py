@@ -18,13 +18,13 @@ def get_repo_info(repo_owner, repo_name, token=None):
     try:
         repo = gh.get_repo(f"{repo_owner}/{repo_name}")
         repo_info = {
-            'name': repo.name,
-            'owner': repo.owner.login,
-            'url': repo.html_url,
-            'description': repo.description or "No description provided.",
-            'stars': repo.stargazers_count,
-            'forks': repo.forks_count,
-            'open_issues': repo.open_issues_count,
+            'Tool': repo.name,
+            'Owner': repo.owner.login,
+            'URL': repo.html_url,
+            'About': repo.description or "No description provided.",
+            'Stars': repo.stargazers_count,
+            'Forks': repo.forks_count,
+            'Issues': repo.open_issues_count,
         }
         return repo_info
     except GithubException as e:
