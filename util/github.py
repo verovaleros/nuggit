@@ -60,6 +60,7 @@ def get_repo_info(repo_owner, repo_name, token=None):
             'Latest Release': get_repo_latest_release(repo),
             'License': get_repo_license(repo),
             'Topics': get_repo_topics(repo),
+            'Contributors': repo.get_contributors().totalCount,
         }
         return repo_info
     except GithubException as e:

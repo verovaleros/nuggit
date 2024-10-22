@@ -96,6 +96,7 @@ def main():
     table.add_row("Stars", str(repo_info["Stars"]))
     table.add_row("Forks", str(repo_info["Forks"]))
     table.add_row("Issues", str(repo_info["Issues"]))
+    table.add_row("Contributors", str(repo_info["Contributors"]))
 
     console.print(table)
 if __name__ == "__main__":
