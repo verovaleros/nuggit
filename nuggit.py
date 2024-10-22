@@ -1,6 +1,8 @@
 import argparse
 import logging
 import sys
+import os
+from dotenv import load_dotenv
 from util.github import validate_repo_url
 
 
@@ -57,7 +59,13 @@ def main():
 
     setup_logging(args.log_file, args.log_level)
 
-    if not validate_repo_url(args.repo):
+    # Load the .env file
+    load_dotenv()
+    github_token = os.getenv('GITHUB_TOKEN')
+
+    if not github_token:
+        logging.error("GitHub token not found in .env file.")
+        sys.exit(1)
         logging.error(f"Invalid repository URL: {args.repo}")
         sys.exit(1)
 
