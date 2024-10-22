@@ -1,3 +1,4 @@
 python-dotenv
 PyGithub
 rich
+urllib3==1.26.16
