@@ -66,6 +66,9 @@ def main():
     if not github_token:
         logging.error("GitHub token not found in .env file.")
         sys.exit(1)
+
+    owner, repository = validate_repo_url(args.repo)
+    if not owner:
         logging.error(f"Invalid repository URL: {args.repo}")
         sys.exit(1)
 
