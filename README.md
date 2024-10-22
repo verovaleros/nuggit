@@ -4,6 +4,17 @@ Nuggit is a Python tool that creates an index-card like summary of a GitHub repo
 
 <img width="800" alt="image" src="https://github.com/user-attachments/assets/719a880e-91b2-457b-a598-c9c9f9947d47">
 
+## Installation
+
+Using virtual environments to manage requirements:
+```bash
+~:$ git clone https://github.com/verovaleros/nuggit.git
+~:$ cd nuggit/
+~:$ python3 -m venv .venv
+~:$ source .venv/bin/activate
+~:$ pip install -r requirements.txt
+```
+
 ## Usage
 ```python
 ~:$ python3 nuggit.py --help
