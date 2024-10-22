@@ -11,6 +11,19 @@ def validate_repo_url(repo_url):
         return False
     return match.groups() 
 
+
+def get_repo_latest_release(repo):
+    try:
+        releases = repo.get_releases()
+        if releases.totalCount > 0:
+            latest_release = releases[0]
+            return f"{latest_release.tag_name} ({latest_release.published_at.date()})"
+        else:
+            return "No releases"
+    except GithubException:
+        return "No releases"
+
+
 def get_repo_license(repo):
     try:
         license_info = repo.get_license()
