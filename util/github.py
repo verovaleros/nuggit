@@ -49,6 +49,8 @@ def get_repo_info(repo_owner, repo_name, token=None):
             'Stars': repo.stargazers_count,
             'Forks': repo.forks_count,
             'Issues': repo.open_issues_count,
+            'Latest Release': get_repo_latest_release(repo),
+            'License': get_repo_license(repo),
         }
         return repo_info
     except GithubException as e:
