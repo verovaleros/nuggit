@@ -2,7 +2,7 @@
 
 Nuggit is a Python tool that creates an index-card like summary of a GitHub repository.
 
-<img width="800" alt="image" src="https://github.com/user-attachments/assets/719a880e-91b2-457b-a598-c9c9f9947d47">
+<img width="800" alt="image" src="https://github.com/user-attachments/assets/9c83975c-2139-4ee6-9e7a-6cbcb687792e">
 
 ## Installation
 
