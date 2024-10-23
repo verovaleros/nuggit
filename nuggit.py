@@ -80,7 +80,7 @@ def main():
     repo_info = get_repo_info(owner, repository, github_token)
     repo_topics = ', '.join(repo_info["Topics"])
 
-    console = Console()
+    console = Console(record=True, width=100)
 
     table = Table(title="Nuggit Repository Information", row_styles=["reverse",""])
 
@@ -100,6 +100,10 @@ def main():
     table.add_row("Commits", str(repo_info["Commits"]))
 
     console.print(table)
+
+    # Save the console output to an HTML file
+    console.save_html(repo_info["Tool"]+".html", inline_styles=True)
+
+
 if __name__ == "__main__":
     main()
-
