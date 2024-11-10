@@ -1,6 +1,11 @@
 import re
 from github import Github
 from github.GithubException import GithubException
+import logging
+
+# Suppress lower-level logs from PyGithub
+logging.getLogger("github").setLevel(logging.ERROR)
+
 
 def validate_repo_url(repo_url):
     """
@@ -48,7 +53,13 @@ def get_repo_info(repo_owner, repo_name, token=None):
     gh = Github(token) if token else Github()
 
     try:
+        total_contributors = "Unknown"
         repo = gh.get_repo(f"{repo_owner}/{repo_name}")
+        try:
+            total_contributors = repo.get_contributors()
+            total_contributors = total_contributors.totalCount
+        except GithubException:
+            total_contributors = "5000+"
 
         repo_info = {
             'Tool': repo.name,
@@ -61,7 +72,7 @@ def get_repo_info(repo_owner, repo_name, token=None):
             'Latest Release': get_repo_latest_release(repo),
             'License': get_repo_license(repo),
             'Topics': get_repo_topics(repo),
-            'Contributors': repo.get_contributors().totalCount,
+            'Contributors': total_contributors,
             'Commits': repo.get_commits().totalCount,
         }
         return repo_info
