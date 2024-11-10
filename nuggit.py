@@ -80,14 +80,13 @@ def main():
     repo_info = get_repo_info(owner, repository, github_token)
     repo_topics = ', '.join(repo_info["Topics"])
 
-    console = Console(record=True, width=100)
+    console = Console(record=True)
 
     table = Table(title="Nuggit Repository Information", row_styles=["reverse",""])
 
     # Set max_width for columns
     table.add_column(repo_info["Tool"], style="cyan", no_wrap=True, width=15)
-    table.add_column(repo_info["URL"], style="magenta", max_width=60, overflow="fold")
-
+    table.add_column(repo_info["URL"], style="magenta", width=60, overflow="fold")
 
     table.add_row("About", repo_info["About"])
     table.add_row("Topics", repo_topics)
