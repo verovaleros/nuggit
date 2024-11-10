@@ -42,8 +42,8 @@ def main():
                         help="URL of the GitHub repository to analyze.")
     parser.add_argument('-l', '--log_file',
                         required=False,
-                        help='Log file name (default: nuggit.log)',
-                        default='nuggit.log')
+                        help='Log file name (default: logs/nuggit.log)',
+                        default='logs/nuggit.log')
     parser.add_argument('-d', '--debug',
                         required=False,
                         help="Extra verbose for debugging.",
@@ -101,7 +101,7 @@ def main():
     console.print(table)
 
     # Save the console output to an HTML file
-    console.save_html(repo_info["Tool"]+".html", inline_styles=True)
+    console.save_html("output/"+repo_info["Tool"]+".html", inline_styles=True)
 
 
 if __name__ == "__main__":
