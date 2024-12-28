@@ -31,5 +31,13 @@ optional arguments:
   -v, --verbose         Be verbose```
 ```
 
+### Docker
+
+Run nuggit via Docker with:
+
+```bash
+:~$ docker run -ti -v $(pwd)/nuggit/.env:/nuggit/.env:ro -v $(pwd)/nuggit/output:/nuggit/output/ -v $(pwd)/nuggit/logs:/nuggit/logs ghcr.io/verovaleros/nuggit:latest python3 nuggit.py -r https://github.com/verovaleros/nuggit
+```
+
 ## About
 This tool was created by verovaleros on October 2024. GNU General Public License v2.0.
