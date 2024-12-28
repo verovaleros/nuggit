@@ -13,11 +13,13 @@ Using virtual environments to manage requirements:
 :~$ python3 -m venv .venv
 :~$ source .venv/bin/activate
 :~$ pip install -r requirements.txt
+:~$ cp nuggit/.env_EXAMPLE nuggit/.env
+:~$ #edit the .env file to add your GH token
 ```
 
 ## Usage
 ```python
-:~$ python3 nuggit.py --help
+:~$ python3 nuggit/nuggit.py --help
 usage: nuggit.py [-h] -r REPO [-l LOG_FILE] [-d] [-v]
 
 Nuggit: Small bits of big insights from GitHub repositories
