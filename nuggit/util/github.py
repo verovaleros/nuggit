@@ -83,3 +83,16 @@ def get_repo_info(repo_owner, repo_name, token=None):
         print(f"Error accessing repository: {e}")
         return None
 
+
+def get_recent_commits(repo, limit=5):
+    try:
+        commits = repo.get_commits()
+        return [{
+            "sha": commit.sha[:7],
+            "author": commit.commit.author.name if commit.commit.author else "Unknown",
+            "date": commit.commit.author.date.isoformat() if commit.commit.author else "",
+            "message": commit.commit.message.splitlines()[0]
+        } for commit in commits[:limit]]
+    except GithubException:
+        return []
+
