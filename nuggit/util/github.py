@@ -19,14 +19,10 @@ def validate_repo_url(repo_url):
 
 def get_repo_latest_release(repo):
     try:
-        releases = repo.get_releases()
-        if releases.totalCount > 0:
-            latest_release = releases[0]
-            return f"{latest_release.tag_name} ({latest_release.published_at.date()})"
-        else:
-            return "No releases"
-    except GithubException:
-        return "No releases"
+        release = repo.get_latest_release()
+        return release.tag_name
+    except Exception:
+        return "No release"
 
 
 def get_repo_license(repo):
@@ -53,29 +49,37 @@ def get_repo_info(repo_owner, repo_name, token=None):
     gh = Github(token) if token else Github()
 
     try:
-        total_contributors = "Unknown"
         repo = gh.get_repo(f"{repo_owner}/{repo_name}")
+
+        # Get contributors count (with fallback)
         try:
-            total_contributors = repo.get_contributors()
-            total_contributors = total_contributors.totalCount
+            contributors = repo.get_contributors()
+            total_contributors = contributors.totalCount
         except GithubException:
             total_contributors = "5000+"
 
         repo_info = {
-            'Tool': repo.name,
-            'Owner': repo.owner.login,
-            'URL': repo.html_url,
-            'About': repo.description or "No description provided.",
-            'Stars': repo.stargazers_count,
-            'Forks': repo.forks_count,
-            'Issues': repo.open_issues_count,
-            'Latest Release': get_repo_latest_release(repo),
-            'License': get_repo_license(repo),
-            'Topics': get_repo_topics(repo),
-            'Contributors': total_contributors,
-            'Commits': repo.get_commits().totalCount,
+            "id": f"{repo_owner}/{repo_name}",
+            "name": repo.name,
+            "description": repo.description or "No description provided.",
+            "url": repo.html_url,
+            "topics": ', '.join(get_repo_topics(repo)),
+            "license": get_repo_license(repo),
+            "created_at": repo.created_at.isoformat() if repo.created_at else "",
+            "updated_at": repo.updated_at.isoformat() if repo.updated_at else "",
+            "stars": repo.stargazers_count,
+            "forks": repo.forks_count,
+            "issues": repo.open_issues_count,
+            "contributors": str(total_contributors),
+            "commits": repo.get_commits().totalCount,
+            "last_commit": repo.pushed_at.isoformat() if repo.pushed_at else "",
+            "tags": "",
+            "notes": ""
         }
+
         return repo_info
+
     except GithubException as e:
         print(f"Error accessing repository: {e}")
         return None
+

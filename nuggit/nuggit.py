@@ -5,6 +5,9 @@ import os
 from dotenv import load_dotenv
 from util.github import validate_repo_url
 from util.github import get_repo_info
+from util.github import get_repo_latest_release
+from util.db import initialize_database
+from util.db import insert_or_update_repo
 from rich.console import Console
 from rich.table import Table
 
@@ -76,32 +79,34 @@ def main():
         sys.exit(1)
 
     logging.info(f"Starting analysis of repository: {args.repo}")
+    initialize_database()
 
     repo_info = get_repo_info(owner, repository, github_token)
-    repo_topics = ', '.join(repo_info["Topics"])
+
+    insert_or_update_repo(repo_info)
 
     console = Console(record=True)
 
-    table = Table(title="Nuggit Repository Information", row_styles=["reverse",""])
+    table = Table(title="Nuggit Repository Information", row_styles=["reverse", ""])
 
     # Set max_width for columns
-    table.add_column(repo_info["Tool"], style="cyan", no_wrap=True, width=15)
-    table.add_column(repo_info["URL"], style="magenta", width=60, overflow="fold")
+    table.add_column(repo_info["name"], style="cyan", no_wrap=True, width=15)
+    table.add_column(repo_info["url"], style="magenta", width=60, overflow="fold")
 
-    table.add_row("About", repo_info["About"])
-    table.add_row("Topics", repo_topics)
-    table.add_row("License", repo_info["License"])
-    table.add_row("Latest Release", repo_info["Latest Release"])
-    table.add_row("Stars", str(repo_info["Stars"]))
-    table.add_row("Forks", str(repo_info["Forks"]))
-    table.add_row("Issues", str(repo_info["Issues"]))
-    table.add_row("Contributors", str(repo_info["Contributors"]))
-    table.add_row("Commits", str(repo_info["Commits"]))
+    table.add_row("About", repo_info["description"])
+    table.add_row("Topics", repo_info["topics"])
+    table.add_row("License", repo_info["license"])
+    table.add_row("Latest Release", get_repo_latest_release(owner + "/" + repository))
+    table.add_row("Stars", str(repo_info["stars"]))
+    table.add_row("Forks", str(repo_info["forks"]))
+    table.add_row("Issues", str(repo_info["issues"]))
+    table.add_row("Contributors", str(repo_info["contributors"]))
+    table.add_row("Commits", str(repo_info["commits"]))
 
     console.print(table)
 
     # Save the console output to an HTML file
-    console.save_html("output/"+repo_info["Tool"]+".html", inline_styles=True)
+    console.save_html("output/" + repo_info["name"] + ".html", inline_styles=True)
 
 
 if __name__ == "__main__":
