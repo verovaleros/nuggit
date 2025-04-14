@@ -153,3 +153,12 @@ def get_repository_history(repo_id: str) -> list[Dict[str, Any]]:
         columns = [desc[0] for desc in cursor.description]
         return [dict(zip(columns, row)) for row in rows]
 
+def update_repository_metadata(repo_id: str, tags: str, notes: str) -> bool:
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    cursor.execute("UPDATE repositories SET tags = ?, notes = ? WHERE id = ?", (tags, notes, repo_id))
+    conn.commit()
+    success = cursor.rowcount > 0
+    conn.close()
+    return success
