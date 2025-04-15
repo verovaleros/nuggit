@@ -4,3 +4,17 @@
 *.log
 *.html
 nuggit/nuggit.db
+# node_modules should never be committed
+node_modules/
+
+# build output
+dist/
+build/
+
+# system/editor stuff
+.DS_Store
+.idea/
+.vscode/
+
+# environment/config
+.env
