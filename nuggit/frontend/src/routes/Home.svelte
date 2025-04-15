@@ -3,6 +3,16 @@
 
   let currentTab = 'repos';
 
+  function parseHashTab() {
+    const params = new URLSearchParams(window.location.hash.split('?')[1]);
+    currentTab = params.get('tab') || 'repos';
+  }
+
+  onMount(() => {
+    parseHashTab();
+    window.addEventListener('hashchange', parseHashTab);
+  });
+
   function switchTab(tab) {
     currentTab = tab;
   }

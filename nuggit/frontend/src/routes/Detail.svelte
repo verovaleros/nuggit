@@ -129,31 +129,39 @@
   }
 
   .nav-back {
-    max-width: 960px;
-    margin: 1rem auto -1rem auto;
-    text-align: left;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
   }
-
   .nav-back button {
-    background-color: #e5e7eb;
-    color: #111827;
+    padding: 0.6rem 1.2rem;
+    font-weight: bold;
     border: none;
-    border-radius: 6px;
-    padding: 0.5rem 1rem;
+    border-radius: 8px;
     cursor: pointer;
-    font-size: 1rem;
+    transition: background-color 0.2s;
   }
 
   .nav-back button:hover {
-    background-color: #d1d5db;
+    background-color: #e5e7eb;
+  }
+
+  .nav-back .add-repo {
+    background-color: #1f2937;
+    color: white;
+  }
+
+  .nav-back .add-repo:hover {
+    background-color: #374151;
   }
 </style>
 
-<div class="nav-back">
-  <button on:click={() => window.location.hash = '#/'}>← Back to Home</button>
-</div>
-
 <div class="container">
+  <div class="nav-back">
+    <button on:click={() => (window.location.hash = '#/')}>&larr; Back to Home</button>
+    <button class="add-repo" on:click={() => (window.location.hash = '#/?tab=add')}>➕ Add Repo</button>
+  </div>
   {#if loading}
     <h1>Loading repository data…</h1>
   {:else if error}
