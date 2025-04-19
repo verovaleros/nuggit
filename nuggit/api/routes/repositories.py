@@ -160,43 +160,37 @@ def add_repository(repo_input: RepositoryInput = Body(...), max_retries: int = Q
     except ValueError:
         raise HTTPException(status_code=400, detail="Repository ID must be in the format 'owner/name'")
 
-    repo_info = get_repo_info(owner, name)
-    if not repo_info:
-        raise HTTPException(status_code=404, detail="Repository not found on GitHub")
 
-    # Store in SQLite
+@router.delete("/{repo_id:path}", summary="Delete a repository from the database")
+def delete_repository(repo_id: str):
+    """
+    Delete a repository from the database.
+
+    Args:
+        repo_id (str): The ID of the repository to delete.
+
+    Returns:
+        dict: A message indicating the result of the operation.
+
+    Raises:
+        HTTPException: If the repository is not found or there is an error deleting it.
+    """
+    # Check if repository exists
+    existing_repo = get_repository(repo_id)
+    if not existing_repo:
+        raise HTTPException(status_code=404, detail=f"Repository {repo_id} not found")
+
     try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        # Use the db function to delete the repository
+        success = db_delete_repository(repo_id)
 
-        cursor.execute("""
-            INSERT OR REPLACE INTO repositories (
-                id, name, description, url, topics, license, created_at, updated_at,
-                stars, forks, issues, contributors, commits, last_commit, tags, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            repo_info["id"],
-            repo_info["name"],
-            repo_info["description"],
-            repo_info["url"],
-            repo_info["topics"],
-            repo_info["license"],
-            repo_info["created_at"],
-            repo_info["updated_at"],
-            repo_info["stars"],
-            repo_info["forks"],
-            repo_info["issues"],
-            repo_info["contributors"],
-            repo_info["commits"],
-            repo_info["last_commit"],
-            repo_info["tags"],
-            repo_info["notes"]
-        ))
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Repository {repo_id} not found")
 
-        conn.commit()
-        conn.close()
-
-        return {"message": f"Repository '{repo_info['id']}' added successfully."}
-
+        return {"message": f"Repository '{repo_id}' deleted successfully."}
+    except sqlite3.Error as e:
+        logging.error(f"Database error deleting repository {repo_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save to database: {e}")
+        logging.error(f"Error deleting repository {repo_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete repository: {str(e)}")
