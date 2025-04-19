@@ -9,6 +9,9 @@
   let tags = '';
   let notes = '';
   let saveStatus = '';
+  let updateStatus = '';
+  let showDeleteConfirm = false;
+  let deleteError = '';
 
   onMount(async () => {
     const hash = window.location.hash;
@@ -25,11 +28,16 @@
 
     try {
       const res = await fetch(`http://localhost:8000/repositories/${repoId}`);
+
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+
       repo = await res.json();
-      tags = repo.tags;
-      notes = repo.notes;
+      tags = repo.tags || '';
+      notes = repo.notes || '';
     } catch (err) {
-      error = 'Failed to fetch repository details.';
+      error = `Failed to fetch repository details: ${err.message}`;
       console.error(err);
     } finally {
       loading = false;
@@ -39,7 +47,8 @@
   async function saveMetadata() {
     saveStatus = 'Saving...';
     try {
-      const res = await fetch(`http://localhost:8000/repositories/${repoId}`, {
+      // Use the metadata endpoint for updating tags and notes
+      const res = await fetch(`http://localhost:8000/repositories/${repoId}/metadata`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
@@ -52,10 +61,72 @@
       }
 
       saveStatus = '✅ Saved!';
+
+      // Clear the status after 3 seconds
+      setTimeout(() => {
+        saveStatus = '';
+      }, 3000);
     } catch (err) {
       console.error(err);
       saveStatus = '❌ Failed to save.';
     }
+  }
+
+  async function updateRepository() {
+    updateStatus = 'Updating from GitHub...';
+    try {
+      const res = await fetch(`http://localhost:8000/repositories/${repoId}`, {
+        method: 'PUT'
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+
+      const data = await res.json();
+      repo = data.repository;
+      updateStatus = '✅ Repository updated!';
+
+      // Update the tags and notes from the updated repository
+      tags = repo.tags || '';
+      notes = repo.notes || '';
+
+      // Clear the status after 3 seconds
+      setTimeout(() => {
+        updateStatus = '';
+      }, 3000);
+    } catch (err) {
+      console.error(err);
+      updateStatus = `❌ Failed to update: ${err.message}`;
+    }
+  }
+
+  async function deleteRepository() {
+    try {
+      const res = await fetch(`http://localhost:8000/repositories/${repoId}`, {
+        method: 'DELETE'
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+
+      // Redirect to home page after successful deletion
+      window.location.hash = '#/';
+    } catch (err) {
+      console.error(err);
+      deleteError = `Failed to delete repository: ${err.message}`;
+      showDeleteConfirm = false;
+    }
+  }
+
+  function confirmDelete() {
+    showDeleteConfirm = true;
+  }
+
+  function cancelDelete() {
+    showDeleteConfirm = false;
+    deleteError = '';
   }
 </script>
 
@@ -122,10 +193,75 @@
     text-align: center;
   }
 
-  .save-status {
+  .save-status, .update-status {
     margin-top: 0.5rem;
     text-align: center;
     font-style: italic;
+  }
+
+  .action-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+
+  .update-button {
+    background-color: #4f46e5;
+  }
+
+  .update-button:hover {
+    background-color: #4338ca;
+  }
+
+  .delete-button {
+    background-color: #ef4444;
+  }
+
+  .delete-button:hover {
+    background-color: #dc2626;
+  }
+
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+  }
+
+  .modal {
+    background-color: white;
+    padding: 2rem;
+    border-radius: 8px;
+    max-width: 500px;
+    width: 90%;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+
+  .modal h3 {
+    margin-top: 0;
+    color: #ef4444;
+  }
+
+  .modal-buttons {
+    display: flex;
+    justify-content: flex-end;
+    gap: 1rem;
+    margin-top: 1.5rem;
+  }
+
+  .cancel-button {
+    background-color: #6b7280;
+  }
+
+  .confirm-button {
+    background-color: #ef4444;
   }
 
   .nav-back {
@@ -200,6 +336,31 @@
       <button on:click={saveMetadata}>💾 Save Tags & Notes</button>
       {#if saveStatus}<p class="save-status">{saveStatus}</p>{/if}
     </div>
+
+    <div class="action-buttons">
+      <button class="update-button" on:click={updateRepository}>🔄 Update from GitHub</button>
+      <button class="delete-button" on:click={confirmDelete}>🗑️ Delete Repository</button>
+    </div>
+    {#if updateStatus}<p class="update-status">{updateStatus}</p>{/if}
+
+    {#if showDeleteConfirm}
+      <div class="modal-overlay">
+        <div class="modal">
+          <h3>⚠️ Delete Repository</h3>
+          <p>Are you sure you want to delete <strong>{repo.name}</strong>?</p>
+          <p>This action cannot be undone. The repository will be removed from the database, but the actual GitHub repository will not be affected.</p>
+
+          {#if deleteError}
+            <p class="error">{deleteError}</p>
+          {/if}
+
+          <div class="modal-buttons">
+            <button class="cancel-button" on:click={cancelDelete}>Cancel</button>
+            <button class="confirm-button" on:click={deleteRepository}>Delete</button>
+          </div>
+        </div>
+      </div>
+    {/if}
 
     <h2>🕘 Recent Commits</h2>
     {#if repo.recent_commits.length > 0}
