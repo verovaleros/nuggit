@@ -161,6 +161,72 @@ def add_repository(repo_input: RepositoryInput = Body(...), max_retries: int = Q
         raise HTTPException(status_code=400, detail="Repository ID must be in the format 'owner/name'")
 
 
+@router.post("/batch", summary="Import multiple repositories at once")
+def batch_import_repositories(batch_input: BatchRepositoryInput = Body(...)):
+    """
+    Import multiple repositories at once.
+
+    Args:
+        batch_input (BatchRepositoryInput): The batch import request with a list of repository IDs.
+
+    Returns:
+        dict: A summary of the import operation.
+
+    Raises:
+        HTTPException: If there is an error with the batch import.
+    """
+    if not batch_input.repositories:
+        raise HTTPException(status_code=400, detail="No repositories provided for import")
+
+    results = {
+        "successful": [],
+        "failed": []
+    }
+
+    for repo_id in batch_input.repositories:
+        try:
+            # Validate repository ID format
+            if not re.match(r'^[\w.-]+/[\w.-]+$', repo_id):
+                results["failed"].append({
+                    "id": repo_id,
+                    "error": "Invalid repository ID format"
+                })
+                continue
+
+            owner, name = repo_id.strip().split('/')
+
+            # Get repository information from GitHub
+            repo_info = get_repo_info(owner, name, token=batch_input.token)
+            if not repo_info:
+                results["failed"].append({
+                    "id": repo_id,
+                    "error": "Repository not found on GitHub"
+                })
+                continue
+
+            # Save to DB
+            insert_or_update_repo(repo_info)
+
+            # Add to successful list
+            results["successful"].append({
+                "id": repo_id,
+                "name": repo_info["name"]
+            })
+
+        except Exception as e:
+            logging.error(f"Error importing repository {repo_id}: {e}")
+            results["failed"].append({
+                "id": repo_id,
+                "error": str(e)
+            })
+
+    # Return summary
+    return {
+        "message": f"Batch import completed. {len(results['successful'])} succeeded, {len(results['failed'])} failed.",
+        "results": results
+    }
+
+
 @router.delete("/{repo_id:path}", summary="Delete a repository from the database")
 def delete_repository(repo_id: str):
     """
