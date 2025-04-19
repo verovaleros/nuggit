@@ -22,6 +22,22 @@
   // Collapsible sections
   let commentsCollapsed = true;
   let commitsCollapsed = true;
+  let versionsCollapsed = true;
+
+  // Version tracker
+  let newVersion = '';
+  let versionReleaseDate = '';
+  let versionDescription = '';
+  let versionStatus = '';
+  let addingVersion = false;
+
+  // Version comparison
+  let showComparison = false;
+  let selectedVersion1 = null;
+  let selectedVersion2 = null;
+  let comparisonResult = null;
+  let comparisonError = null;
+  let loadingComparison = false;
 
   onMount(async () => {
     const hash = window.location.hash;
@@ -37,7 +53,10 @@
     }
 
     try {
-      const res = await fetch(`http://localhost:8000/repositories/${repoId}`);
+      // Encode the repository ID for the URL
+      const encodedRepoId = encodeURIComponent(repoId);
+
+      const res = await fetch(`http://localhost:8000/repositories/${encodedRepoId}`);
 
       if (!res.ok) {
         throw new Error(await res.text());
@@ -58,7 +77,10 @@
     saveStatus = 'Saving...';
     try {
       // Use the metadata endpoint for updating tags
-      const res = await fetch(`http://localhost:8000/repositories/${repoId}/metadata`, {
+      // Encode the repository ID for the URL
+      const encodedRepoId = encodeURIComponent(repoId);
+
+      const res = await fetch(`http://localhost:8000/repositories/${encodedRepoId}/metadata`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
@@ -85,7 +107,10 @@
   async function updateRepository() {
     updateStatus = 'Updating from GitHub...';
     try {
-      const res = await fetch(`http://localhost:8000/repositories/${repoId}`, {
+      // Encode the repository ID for the URL
+      const encodedRepoId = encodeURIComponent(repoId);
+
+      const res = await fetch(`http://localhost:8000/repositories/${encodedRepoId}`, {
         method: 'PUT'
       });
 
@@ -93,10 +118,17 @@
         throw new Error(await res.text());
       }
 
+      // Parse the response from the update endpoint
+      const updateData = await res.json();
+      console.log('Update response:', updateData);
+
       // After successful update, fetch the repository details again to get the latest data
       // including comments and recent commits
       try {
-        const detailRes = await fetch(`http://localhost:8000/repositories/${repoId}`);
+        // Encode the repository ID for the URL
+        const encodedRepoId = encodeURIComponent(repoId);
+
+        const detailRes = await fetch(`http://localhost:8000/repositories/${encodedRepoId}`);
 
         if (!detailRes.ok) {
           throw new Error(await detailRes.text());
@@ -104,6 +136,7 @@
 
         // Update the repository data with the latest information
         repo = await detailRes.json();
+        console.log('Updated repository details:', repo);
 
         // Update the tags from the updated repository
         tags = repo.tags || '';
@@ -126,7 +159,10 @@
 
   async function deleteRepository() {
     try {
-      const res = await fetch(`http://localhost:8000/repositories/${repoId}`, {
+      // Encode the repository ID for the URL
+      const encodedRepoId = encodeURIComponent(repoId);
+
+      const res = await fetch(`http://localhost:8000/repositories/${encodedRepoId}`, {
         method: 'DELETE'
       });
 
@@ -160,6 +196,131 @@
     commitsCollapsed = !commitsCollapsed;
   }
 
+  function toggleVersions() {
+    versionsCollapsed = !versionsCollapsed;
+  }
+
+  function toggleComparison() {
+    showComparison = !showComparison;
+    if (!showComparison) {
+      // Reset comparison state when closing
+      selectedVersion1 = null;
+      selectedVersion2 = null;
+      comparisonResult = null;
+      comparisonError = null;
+    }
+  }
+
+  async function compareVersions() {
+    if (!selectedVersion1 || !selectedVersion2) {
+      comparisonError = 'Please select two versions to compare.';
+      return;
+    }
+
+    if (selectedVersion1 === selectedVersion2) {
+      comparisonError = 'Please select two different versions to compare.';
+      return;
+    }
+
+    loadingComparison = true;
+    comparisonError = null;
+    comparisonResult = null;
+
+    try {
+      // Encode the repository ID for the URL
+      const encodedRepoId = encodeURIComponent(repoId);
+
+      // Use the new API endpoint that works with query parameters
+      console.log(`Using API endpoint: http://localhost:8000/api/compare-versions?repo_id=${encodedRepoId}&version1_id=${selectedVersion1}&version2_id=${selectedVersion2}`);
+      const queryRes = await fetch(`http://localhost:8000/api/compare-versions?repo_id=${encodedRepoId}&version1_id=${selectedVersion1}&version2_id=${selectedVersion2}`);
+
+      if (!queryRes.ok) {
+        throw new Error(await queryRes.text());
+      }
+
+      comparisonResult = await queryRes.json();
+      console.log('Version comparison succeeded:', comparisonResult);
+    } catch (err) {
+      console.error(err);
+      comparisonError = `Failed to compare versions: ${err.message}`;
+    } finally {
+      loadingComparison = false;
+    }
+  }
+
+  function formatDiff(diff) {
+    if (!diff) return '';
+
+    // Split the diff into lines
+    const lines = diff.split('\n');
+
+    // Format each line with appropriate styling
+    return lines.map(line => {
+      if (line.startsWith('+')) {
+        return `<span class="diff-line-added">${line}</span>`;
+      } else if (line.startsWith('-')) {
+        return `<span class="diff-line-removed">${line}</span>`;
+      } else {
+        return line;
+      }
+    }).join('\n');
+  }
+
+  async function addVersion() {
+    if (!newVersion.trim()) {
+      versionStatus = 'Please enter a version number.';
+      return;
+    }
+
+    addingVersion = true;
+    versionStatus = 'Adding version...';
+
+    try {
+      const versionData = {
+        version_number: newVersion.trim(),
+        release_date: versionReleaseDate || null,
+        description: versionDescription.trim() || null
+      };
+
+      // Encode the repository ID for the URL
+      const encodedRepoId = encodeURIComponent(repoId);
+
+      const res = await fetch(`http://localhost:8000/repositories/${encodedRepoId}/versions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(versionData)
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+
+      // Get the new version
+      const newVersionData = await res.json();
+
+      // Add the new version to the list
+      repo.versions = [newVersionData, ...repo.versions];
+
+      // Clear the form
+      newVersion = '';
+      versionReleaseDate = '';
+      versionDescription = '';
+      versionStatus = '✅ Version added!';
+
+      // Clear the status after 3 seconds
+      setTimeout(() => {
+        versionStatus = '';
+      }, 3000);
+    } catch (err) {
+      console.error(err);
+      versionStatus = `❌ Failed to add version: ${err.message}`;
+    } finally {
+      addingVersion = false;
+    }
+  }
+
   async function addComment() {
     if (!newComment.trim()) {
       commentStatus = 'Please enter a comment.';
@@ -170,7 +331,10 @@
     commentStatus = 'Adding comment...';
 
     try {
-      const res = await fetch(`http://localhost:8000/repositories/${repoId}/comments`, {
+      // Encode the repository ID for the URL
+      const encodedRepoId = encodeURIComponent(repoId);
+
+      const res = await fetch(`http://localhost:8000/repositories/${encodedRepoId}/comments`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -400,10 +564,197 @@
     width: 200px;
   }
 
-  .comment-status {
+  .comment-status, .version-status {
     margin-top: 0.5rem;
     text-align: center;
     font-style: italic;
+  }
+
+  /* Version tracker styles */
+  .versions-section {
+    margin-top: 2rem;
+  }
+
+  .versions-list {
+    margin-top: 1rem;
+  }
+
+  .version {
+    background-color: #f9fafb;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  .version-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+    color: #6b7280;
+  }
+
+  .version-number {
+    font-weight: bold;
+    font-size: 1.1rem;
+    color: #1f2937;
+  }
+
+  .version-date {
+    font-style: italic;
+  }
+
+  .version-description {
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin-top: 0.5rem;
+  }
+
+  .version-form {
+    margin-top: 1rem;
+    background-color: #f9fafb;
+    border-radius: 8px;
+    padding: 1rem;
+  }
+
+  .version-form-row {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .version-form-row .field {
+    flex: 1;
+  }
+
+  .version-form-row label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: bold;
+    font-size: 0.9rem;
+  }
+
+  .version-form textarea {
+    width: 100%;
+    min-height: 100px;
+    margin-bottom: 0.5rem;
+  }
+
+  /* Version comparison styles */
+  .comparison-container {
+    margin-top: 1.5rem;
+    background-color: #f9fafb;
+    border-radius: 8px;
+    padding: 1rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  .comparison-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .comparison-header h3 {
+    margin: 0;
+    font-size: 1.2rem;
+  }
+
+  .comparison-header button {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.9rem;
+  }
+
+  .comparison-selectors {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1rem;
+  }
+
+  .comparison-selector {
+    flex: 1;
+  }
+
+  .comparison-selector label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: bold;
+    font-size: 0.9rem;
+  }
+
+  .comparison-selector select {
+    width: 100%;
+    padding: 0.5rem;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+  }
+
+  .comparison-results {
+    margin-top: 1.5rem;
+  }
+
+  .comparison-field {
+    margin-bottom: 1.5rem;
+  }
+
+  .comparison-field h4 {
+    margin-top: 0;
+    margin-bottom: 0.5rem;
+    font-size: 1rem;
+  }
+
+  .diff-display {
+    font-family: monospace;
+    white-space: pre-wrap;
+    background-color: #f1f5f9;
+    padding: 1rem;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+    overflow-x: auto;
+  }
+
+  .diff-line-added {
+    color: #16a34a;
+    background-color: #dcfce7;
+  }
+
+  .diff-line-removed {
+    color: #dc2626;
+    background-color: #fee2e2;
+  }
+
+  .comparison-error {
+    color: #dc2626;
+    text-align: center;
+    margin: 1rem 0;
+  }
+
+  .comparison-loading {
+    text-align: center;
+    margin: 1rem 0;
+    font-style: italic;
+    color: #6b7280;
+  }
+
+  .compare-button {
+    background-color: #4f46e5;
+    margin-top: 1rem;
+  }
+
+  .compare-button:hover {
+    background-color: #4338ca;
+  }
+
+  .close-comparison-button {
+    background-color: #6b7280;
+  }
+
+  .close-comparison-button:hover {
+    background-color: #4b5563;
   }
 
   /* Collapsible section styles */
@@ -590,6 +941,169 @@
           {/each}
         {:else}
           <p style="text-align: center;">No comments yet. Be the first to comment!</p>
+        {/if}
+      </div>
+    </div>
+
+    <!-- Version Tracker Section (Collapsible) -->
+    <div class="section-header" on:click={toggleVersions}>
+      <h2>📈 Version Tracker</h2>
+      <span class="toggle-icon {versionsCollapsed ? 'collapsed' : ''}">▾</span>
+    </div>
+
+    <div class="section-content {versionsCollapsed ? 'collapsed' : ''}">
+      <!-- Version form -->
+      <div class="version-form">
+        <div class="version-form-row">
+          <div class="field">
+            <label for="version-number">Version Number:</label>
+            <input
+              type="text"
+              id="version-number"
+              bind:value={newVersion}
+              placeholder="e.g., 1.0.0"
+            />
+          </div>
+          <div class="field">
+            <label for="release-date">Release Date (optional):</label>
+            <input
+              type="date"
+              id="release-date"
+              bind:value={versionReleaseDate}
+            />
+          </div>
+        </div>
+
+        <label for="version-description">Description (optional):</label>
+        <textarea
+          id="version-description"
+          bind:value={versionDescription}
+          placeholder="What's new in this version?"
+        ></textarea>
+
+        <div style="text-align: right;">
+          <button on:click={addVersion} disabled={addingVersion}>
+            {addingVersion ? 'Adding...' : '📈 Add Version'}
+          </button>
+        </div>
+
+        {#if versionStatus}
+          <p class="version-status">{versionStatus}</p>
+        {/if}
+      </div>
+
+      <!-- Compare versions button -->
+      {#if repo.versions && repo.versions.length > 1}
+        <div style="text-align: center; margin-top: 1rem;">
+          <button on:click={toggleComparison}>
+            {showComparison ? 'Hide Comparison' : 'Compare Versions'}
+          </button>
+        </div>
+      {/if}
+
+      <!-- Version comparison UI -->
+      {#if showComparison}
+        <div class="comparison-container">
+          <div class="comparison-header">
+            <h3>Version Comparison</h3>
+            <button class="close-comparison-button" on:click={toggleComparison}>Close</button>
+          </div>
+
+          <div class="comparison-selectors">
+            <div class="comparison-selector">
+              <label for="version1-select">First Version:</label>
+              <select id="version1-select" bind:value={selectedVersion1}>
+                <option value={null}>Select a version</option>
+                {#each repo.versions as version}
+                  <option value={version.id}>{version.version_number}</option>
+                {/each}
+              </select>
+            </div>
+
+            <div class="comparison-selector">
+              <label for="version2-select">Second Version:</label>
+              <select id="version2-select" bind:value={selectedVersion2}>
+                <option value={null}>Select a version</option>
+                {#each repo.versions as version}
+                  <option value={version.id}>{version.version_number}</option>
+                {/each}
+              </select>
+            </div>
+          </div>
+
+          <div style="text-align: center;">
+            <button class="compare-button" on:click={compareVersions} disabled={loadingComparison}>
+              {loadingComparison ? 'Comparing...' : 'Compare'}
+            </button>
+          </div>
+
+          {#if comparisonError}
+            <p class="comparison-error">{comparisonError}</p>
+          {/if}
+
+          {#if loadingComparison}
+            <p class="comparison-loading">Loading comparison...</p>
+          {/if}
+
+          {#if comparisonResult}
+            <div class="comparison-results">
+              <div class="comparison-field">
+                <h4>Version Number</h4>
+                {#if comparisonResult.differences.version_number.changed}
+                  <div class="diff-display" >
+                    {@html formatDiff(comparisonResult.differences.version_number.diff)}
+                  </div>
+                {:else}
+                  <p>No changes</p>
+                {/if}
+              </div>
+
+              <div class="comparison-field">
+                <h4>Release Date</h4>
+                {#if comparisonResult.differences.release_date.changed}
+                  <div class="diff-display">
+                    {@html formatDiff(comparisonResult.differences.release_date.diff)}
+                  </div>
+                {:else}
+                  <p>No changes</p>
+                {/if}
+              </div>
+
+              <div class="comparison-field">
+                <h4>Description</h4>
+                {#if comparisonResult.differences.description.changed}
+                  <div class="diff-display">
+                    {@html formatDiff(comparisonResult.differences.description.diff)}
+                  </div>
+                {:else}
+                  <p>No changes</p>
+                {/if}
+              </div>
+            </div>
+          {/if}
+        </div>
+      {/if}
+
+      <!-- Versions list -->
+      <div class="versions-list">
+        {#if repo.versions && repo.versions.length > 0}
+          {#each repo.versions as version}
+            <div class="version">
+              <div class="version-header">
+                <span class="version-number">{version.version_number}</span>
+                {#if version.release_date}
+                  <span class="version-date">Released: {new Date(version.release_date).toLocaleDateString()}</span>
+                {:else}
+                  <span class="version-date">Added: {new Date(version.created_at).toLocaleString()}</span>
+                {/if}
+              </div>
+              {#if version.description}
+                <div class="version-description">{version.description}</div>
+              {/if}
+            </div>
+          {/each}
+        {:else}
+          <p style="text-align: center;">No versions tracked yet. Add the first version above!</p>
         {/if}
       </div>
     </div>

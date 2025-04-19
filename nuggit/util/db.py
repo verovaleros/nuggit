@@ -66,6 +66,19 @@ def initialize_database():
         )
         """)
 
+        # Create versions table
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS repository_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            repo_id TEXT NOT NULL,
+            version_number TEXT NOT NULL,
+            release_date TEXT,
+            description TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (repo_id) REFERENCES repositories(id)
+        )
+        """)
+
 def insert_or_update_repo(repo_data: Dict[str, Any]):
     repo_data.setdefault('last_synced', datetime.utcnow().isoformat())
 
@@ -140,13 +153,21 @@ def add_note(repo_id: str, note: str):
         """, (note, repo_id))
 
 def get_repository(repo_id: str) -> Optional[Dict[str, Any]]:
+    # Debug logging
+    import logging
+    logging.info(f"Getting repository with ID: {repo_id}")
+
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM repositories WHERE id = ?", (repo_id,))
         row = cursor.fetchone()
         if row:
             columns = [desc[0] for desc in cursor.description]
-            return dict(zip(columns, row))
+            result = dict(zip(columns, row))
+            logging.info(f"Found repository: {result['name']}")
+            return result
+
+        logging.warning(f"Repository not found with ID: {repo_id}")
         return None
 
 def list_all_repositories() -> list[Dict[str, Any]]:
@@ -257,6 +278,65 @@ def get_comments(repo_id: str) -> List[Dict[str, Any]]:
         # Get all comments for the repository, ordered by creation time (newest first)
         cursor.execute(
             "SELECT id, comment, author, created_at FROM repository_comments WHERE repo_id = ? ORDER BY created_at DESC",
+            (repo_id,)
+        )
+
+        # Convert the results to a list of dictionaries
+        columns = [column[0] for column in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def add_version(repo_id: str, version_number: str, release_date: Optional[str] = None, description: Optional[str] = None) -> int:
+    """
+    Add a version to a repository.
+
+    Args:
+        repo_id (str): The ID of the repository.
+        version_number (str): The version number (e.g., "1.0.0").
+        release_date (Optional[str], optional): The release date in ISO format. Defaults to None.
+        description (Optional[str], optional): A description of the version. Defaults to None.
+
+    Returns:
+        int: The ID of the newly added version.
+
+    Raises:
+        sqlite3.Error: If there is a database error.
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        # Get current timestamp in ISO format
+        created_at = datetime.utcnow().isoformat()
+
+        # Insert the version
+        cursor.execute(
+            "INSERT INTO repository_versions (repo_id, version_number, release_date, description, created_at) VALUES (?, ?, ?, ?, ?)",
+            (repo_id, version_number, release_date, description, created_at)
+        )
+
+        # Get the ID of the newly inserted version
+        return cursor.lastrowid
+
+
+def get_versions(repo_id: str) -> List[Dict[str, Any]]:
+    """
+    Get all versions for a repository.
+
+    Args:
+        repo_id (str): The ID of the repository.
+
+    Returns:
+        List[Dict[str, Any]]: A list of dictionaries containing version information.
+
+    Raises:
+        sqlite3.Error: If there is a database error.
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        # Get all versions for the repository, ordered by creation time (newest first)
+        cursor.execute(
+            "SELECT id, version_number, release_date, description, created_at FROM repository_versions WHERE repo_id = ? ORDER BY created_at DESC",
             (repo_id,)
         )
 

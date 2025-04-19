@@ -3,6 +3,7 @@ import re
 import time
 import logging
 import sqlite3
+from os import getenv
 from typing import Optional, Union
 from pydantic import BaseModel, Field, validator
 from fastapi import APIRouter, HTTPException, Body, Query, Depends
@@ -163,6 +164,13 @@ def add_repository(repo_input: RepositoryInput = Body(...), max_retries: int = Q
 
 @router.put("/{repo_id:path}", summary="Update repository information from GitHub")
 def update_repository(repo_id: str, token: Optional[str] = None, max_retries: int = Query(3, description="Maximum number of retries for GitHub API calls")):
+    # Use token from environment if not provided
+    if token is None:
+        token = getenv("GITHUB_TOKEN")
+        if token:
+            logging.info(f"Using GitHub token from environment: {token[:4]}...")
+        else:
+            logging.warning("No GitHub token found in environment")
     """
     Update repository information from GitHub.
 

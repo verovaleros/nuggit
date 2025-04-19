@@ -143,14 +143,17 @@
   }
 
   // Calculate filtered and sorted repositories
-  $: {
-    // First filter by search term
-    const filtered = allRepos.filter(matchesSearch);
+  $: filteredRepos = sortRepositories(allRepos.filter(matchesSearch));
 
-    // Then sort the filtered repositories
-    filteredRepos = sortRepositories(filtered);
+  // Log when filtered repos change
+  $: console.log(`Showing ${filteredRepos.length} repositories, sorted by ${sortField} (${sortOrder})`);
 
-    console.log(`Showing ${filteredRepos.length} repositories, sorted by ${sortField} (${sortOrder})`);
+  // Make sure the reactive statement is triggered when searchTerm changes
+  $: searchTerm, recalculateFiltered();
+
+  function recalculateFiltered() {
+    console.log('Search term changed to:', searchTerm);
+    filteredRepos = sortRepositories(allRepos.filter(matchesSearch));
   }
 
   // Reset display count when search term changes

@@ -6,6 +6,7 @@ from github import Github
 from nuggit.util.db import get_repository
 from nuggit.util.db import update_repository_metadata
 from nuggit.util.db import add_comment, get_comments
+from nuggit.util.db import add_version, get_versions
 from nuggit.util.github import get_recent_commits
 from typing import List, Optional
 
@@ -49,8 +50,16 @@ def get_repository_detail(repo_id: str):
         logging.error(f"Could not fetch comments for {repo_id}: {e}")
         comments = []
 
-    # Add commits and comments to the response
-    return {**repo_data, "recent_commits": recent_commits, "comments": comments}
+    # Get versions for the repository
+    try:
+        versions = get_versions(repo_id)
+    except Exception as e:
+        import logging
+        logging.error(f"Could not fetch versions for {repo_id}: {e}")
+        versions = []
+
+    # Add commits, comments, and versions to the response
+    return {**repo_data, "recent_commits": recent_commits, "comments": comments, "versions": versions}
 
 
 class RepoMetadataUpdate(BaseModel):
