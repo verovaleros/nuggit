@@ -51,7 +51,7 @@ class RepoMetadataUpdate(BaseModel):
     notes: str
 
 
-@router.put("/{repo_id:path}", summary="Update repository metadata (tags and notes)")
+@router.put("/{repo_id:path}/metadata", summary="Update repository metadata (tags and notes)")
 def update_repo_metadata(repo_id: str, data: RepoMetadataUpdate = Body(...)):
     """
     Update the metadata (tags and notes) of a repository.
