@@ -23,6 +23,10 @@
   let currentDisplayCount = pageSize;
   let searchTerm = '';
 
+  // Sorting options
+  let sortField = 'last_synced'; // Default sort by last_synced (most recent first)
+  let sortOrder = 'desc'; // Default sort order is descending
+
   // New repo
   let newRepoId = '';
   let addStatus = '';
@@ -88,8 +92,6 @@
     }
 
     const lower = searchTerm.toLowerCase().trim();
-    console.log('Searching for:', lower);
-    console.log('Checking repo:', repo.name);
 
     // Check each field with proper null handling
     const nameMatch = repo.name ? repo.name.toLowerCase().includes(lower) : false;
@@ -97,10 +99,41 @@
     const idMatch = repo.id ? repo.id.toLowerCase().includes(lower) : false;
     const tagsMatch = repo.tags ? repo.tags.toLowerCase().includes(lower) : false;
 
-    const isMatch = nameMatch || descMatch || idMatch || tagsMatch;
-    console.log('Is match:', isMatch);
+    return nameMatch || descMatch || idMatch || tagsMatch;
+  }
 
-    return isMatch;
+  function sortRepositories(repos) {
+    // Create a copy of the array to avoid modifying the original
+    const sortedRepos = [...repos];
+
+    // Sort the repositories based on the selected field and order
+    sortedRepos.sort((a, b) => {
+      let valueA = a[sortField];
+      let valueB = b[sortField];
+
+      // Handle null or undefined values
+      if (valueA === null || valueA === undefined) valueA = '';
+      if (valueB === null || valueB === undefined) valueB = '';
+
+      // Convert to lowercase strings for string comparison
+      if (typeof valueA === 'string') valueA = valueA.toLowerCase();
+      if (typeof valueB === 'string') valueB = valueB.toLowerCase();
+
+      // For numeric fields, convert to numbers
+      if (sortField === 'stars' || sortField === 'forks' || sortField === 'issues' || sortField === 'commits') {
+        valueA = Number(valueA) || 0;
+        valueB = Number(valueB) || 0;
+      }
+
+      // Compare based on sort order
+      if (sortOrder === 'asc') {
+        return valueA > valueB ? 1 : valueA < valueB ? -1 : 0;
+      } else {
+        return valueA < valueB ? 1 : valueA > valueB ? -1 : 0;
+      }
+    });
+
+    return sortedRepos;
   }
 
   function loadNextPage() {
@@ -109,12 +142,15 @@
     console.log(`Now showing up to ${currentDisplayCount} repositories`);
   }
 
-  // Calculate filtered repositories based on search term
+  // Calculate filtered and sorted repositories
   $: {
-    console.log('Recalculating filteredRepos, searchTerm:', searchTerm);
-    console.log('allRepos length:', allRepos.length);
-    filteredRepos = allRepos.filter(matchesSearch);
-    console.log('filteredRepos length:', filteredRepos.length);
+    // First filter by search term
+    const filtered = allRepos.filter(matchesSearch);
+
+    // Then sort the filtered repositories
+    filteredRepos = sortRepositories(filtered);
+
+    console.log(`Showing ${filteredRepos.length} repositories, sorted by ${sortField} (${sortOrder})`);
   }
 
   // Reset display count when search term changes
@@ -124,9 +160,59 @@
     currentDisplayCount = pageSize;
   }
 
+  // Re-sort when sort options change
+  $: if (sortField || sortOrder) {
+    // The reactive statement above will handle the actual sorting
+    // This is just to ensure the statement runs when sort options change
+    console.log(`Sort options changed: ${sortField} (${sortOrder})`);
+  }
+
   function filterByTag(tag) {
     searchTerm = tag;
     currentTab = 'repos';
+  }
+
+  function changeSort(field) {
+    // If clicking on the same field, toggle the sort order
+    if (field === sortField) {
+      sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+    } else {
+      // If clicking on a different field, set it as the new sort field
+      // and reset the sort order based on the field type
+      sortField = field;
+
+      // For date fields and numeric fields, default to descending (newest/highest first)
+      if (field === 'last_synced' || field === 'created_at' || field === 'updated_at' ||
+          field === 'stars' || field === 'forks' || field === 'issues' || field === 'commits') {
+        sortOrder = 'desc';
+      } else {
+        // For text fields, default to ascending (A-Z)
+        sortOrder = 'asc';
+      }
+    }
+  }
+
+  function formatDate(dateString) {
+    if (!dateString) return 'N/A';
+
+    try {
+      const date = new Date(dateString);
+
+      // Check if the date is valid
+      if (isNaN(date.getTime())) return 'Invalid date';
+
+      // Format the date as a readable string
+      return date.toLocaleString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return dateString; // Return the original string if there's an error
+    }
   }
 
   async function addRepo() {
@@ -305,6 +391,33 @@
     color: white;
     padding: 1rem;
     text-align: left;
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+  }
+
+  th:hover {
+    background-color: #374151;
+  }
+
+  th.sorted:after {
+    content: '';
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 0;
+    height: 0;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+  }
+
+  th.sorted.asc:after {
+    border-bottom: 5px solid white;
+  }
+
+  th.sorted.desc:after {
+    border-top: 5px solid white;
   }
 
   td {
@@ -492,10 +605,11 @@
         <table>
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Description</th>
-              <th>License</th>
-              <th>Stars</th>
+              <th class={sortField === 'name' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('name')}>Name</th>
+              <th class={sortField === 'description' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('description')}>Description</th>
+              <th class={sortField === 'license' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('license')}>License</th>
+              <th class={sortField === 'stars' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('stars')}>Stars</th>
+              <th class={sortField === 'last_synced' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('last_synced')}>Updated</th>
             </tr>
           </thead>
           <tbody>
@@ -505,6 +619,7 @@
                 <td>{repo.description}</td>
                 <td>{repo.license}</td>
                 <td>{repo.stars}</td>
+                <td>{formatDate(repo.last_synced)}</td>
               </tr>
             {/each}
           </tbody>
