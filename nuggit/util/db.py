@@ -79,6 +79,53 @@ def initialize_database():
         )
         """)
 
+def add_origin_version(repo_id: str):
+    """
+    Add an 'Origin' version to a newly added repository.
+
+    Args:
+        repo_id (str): The ID of the repository.
+
+    Returns:
+        int: The ID of the newly added version.
+    """
+    import logging
+    import time
+
+    # Get today's date in ISO format (YYYY-MM-DD)
+    today = datetime.now().date().isoformat()
+
+    # Add the Origin version with retry mechanism
+    max_retries = 3
+    retry_delay = 1  # seconds
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            version_id = add_version(
+                repo_id=repo_id,
+                version_number="Origin",
+                release_date=today,
+                description="Repository indexed in Nuggit for the first time"
+            )
+            logging.info(f"Successfully added 'Origin' version for repository {repo_id}")
+            return version_id
+        except Exception as e:
+            last_error = e
+            if 'database is locked' in str(e) and attempt < max_retries - 1:
+                # Database is locked, wait and retry
+                logging.warning(f"Database locked when adding 'Origin' version for {repo_id}, retrying in {retry_delay} seconds...")
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+            else:
+                # Other error or final attempt failed
+                break
+
+    # If we get here, all retries failed
+    logging.error(f"Failed to add 'Origin' version after {max_retries} attempts: {last_error}")
+    raise last_error
+
+
 def insert_or_update_repo(repo_data: Dict[str, Any]):
     repo_data.setdefault('last_synced', datetime.utcnow().isoformat())
 
@@ -89,6 +136,9 @@ def insert_or_update_repo(repo_data: Dict[str, Any]):
         cursor.execute("SELECT * FROM repositories WHERE id = ?", (repo_data['id'],))
         existing = cursor.fetchone()
         columns = [desc[0] for desc in cursor.description]
+
+        # Flag to track if this is a new repository
+        is_new_repo = existing is None
 
         if existing:
             existing_data = dict(zip(columns, existing))
@@ -132,6 +182,40 @@ def insert_or_update_repo(repo_data: Dict[str, Any]):
             notes = excluded.notes,
             last_synced = excluded.last_synced
         """, repo_data)
+
+        # If this is a new repository, schedule the Origin version to be added asynchronously
+        if is_new_repo:
+            import threading
+            import logging
+
+            def add_origin_version_async(repo_id):
+                import time
+                max_retries = 3
+                retry_delay = 1  # seconds
+
+                # Wait a bit to let the main transaction complete
+                time.sleep(1)
+
+                for attempt in range(max_retries):
+                    try:
+                        add_origin_version(repo_id)
+                        logging.info(f"Added 'Origin' version for new repository: {repo_id}")
+                        break  # Success, exit the retry loop
+                    except Exception as e:
+                        if 'database is locked' in str(e) and attempt < max_retries - 1:
+                            # Database is locked, wait and retry
+                            logging.warning(f"Database locked when adding 'Origin' version for {repo_id}, retrying in {retry_delay} seconds...")
+                            time.sleep(retry_delay)
+                            retry_delay *= 2  # Exponential backoff
+                        else:
+                            # Other error or final attempt failed
+                            logging.error(f"Failed to add 'Origin' version for repository {repo_id}: {e}")
+
+            # Start a background thread to add the Origin version
+            thread = threading.Thread(target=add_origin_version_async, args=(repo_data['id'],))
+            thread.daemon = True  # Make the thread a daemon so it doesn't block program exit
+            thread.start()
+            logging.info(f"Scheduled 'Origin' version creation for repository {repo_data['id']} in background")
 
 
 def tag_repository(repo_id: str, tag: str):
@@ -302,6 +386,8 @@ def add_version(repo_id: str, version_number: str, release_date: Optional[str] =
     Raises:
         sqlite3.Error: If there is a database error.
     """
+    import logging
+
     with get_connection() as conn:
         cursor = conn.cursor()
 
@@ -315,7 +401,9 @@ def add_version(repo_id: str, version_number: str, release_date: Optional[str] =
         )
 
         # Get the ID of the newly inserted version
-        return cursor.lastrowid
+        version_id = cursor.lastrowid
+        logging.info(f"Added version '{version_number}' for repository {repo_id} with ID {version_id}")
+        return version_id
 
 
 def get_versions(repo_id: str) -> List[Dict[str, Any]]:

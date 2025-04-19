@@ -12,8 +12,9 @@ from nuggit.util.db import get_repository, add_version, get_versions
 
 router = APIRouter(tags=["versions"])
 
-# Create a separate router for the version comparison endpoint
+# Create separate routers for version-related endpoints
 compare_router = APIRouter(tags=["version comparison"])
+versions_router = APIRouter(tags=["versions"])
 
 
 class VersionCreate(BaseModel):
@@ -93,9 +94,38 @@ def get_repository_versions(repo_id: str, limit: int = Query(20, description="Ma
         HTTPException: If the repository is not found or the versions retrieval fails.
     """
     # Check if repository exists
-    repo = get_repository(repo_id)
+    import logging
+    logging.info(f"Getting versions for repo_id: {repo_id}")
+
+    # Handle the case where the URL path might include '/versions'
+    # This is a workaround for the routing issue
+    if '/versions' in repo_id:
+        actual_repo_id = repo_id.split('/versions')[0]
+        logging.info(f"Extracted actual repo_id from path: {actual_repo_id}")
+        repo = get_repository(actual_repo_id)
+        # Use the actual repo_id for the rest of the function
+        repo_id = actual_repo_id
+    else:
+        repo = get_repository(repo_id)
+
+    # If repo is still None, try to decode the repo_id as it might be URL-encoded
     if not repo:
+        try:
+            import urllib.parse
+            decoded_repo_id = urllib.parse.unquote(repo_id)
+            if decoded_repo_id != repo_id:
+                logging.info(f"Trying with decoded repo_id: {decoded_repo_id}")
+                repo = get_repository(decoded_repo_id)
+                if repo:
+                    repo_id = decoded_repo_id
+        except Exception as e:
+            logging.error(f"Error decoding repo_id: {e}")
+
+    if not repo:
+        logging.error(f"Repository not found: {repo_id}")
         raise HTTPException(status_code=404, detail="Repository not found")
+
+    logging.info(f"Repository found: {repo_id}")
 
     try:
         # Get versions
@@ -198,6 +228,44 @@ def compare_versions(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to compare versions: {str(e)}")
+
+
+# New endpoint for getting versions that doesn't use path parameters for the repository ID
+@versions_router.get("/get-versions", summary="Get versions for a repository (query params)")
+def get_versions_query(repo_id: str = Query(..., description="The ID of the repository"), limit: int = Query(20, description="Maximum number of versions to return")):
+    """
+    Get versions for a repository using query parameters.
+
+    Args:
+        repo_id (str): The ID of the repository.
+        limit (int, optional): Maximum number of versions to return. Defaults to 20.
+
+    Returns:
+        List[Dict[str, Any]]: A list of versions.
+
+    Raises:
+        HTTPException: If the repository is not found or the versions retrieval fails.
+    """
+    # Debug logging
+    import logging
+    logging.info(f"Getting versions using query params - repo_id: {repo_id}")
+
+    # Check if repository exists
+    repo = get_repository(repo_id)
+    if not repo:
+        logging.error(f"Repository not found: {repo_id}")
+        raise HTTPException(status_code=404, detail="Repository not found")
+
+    logging.info(f"Repository found: {repo_id}")
+
+    try:
+        # Get versions
+        versions = get_versions(repo_id)
+
+        # Limit the number of versions
+        return versions[:limit]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get versions: {str(e)}")
 
 
 # New endpoint for version comparison that doesn't use path parameters for the repository ID

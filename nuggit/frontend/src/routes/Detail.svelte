@@ -56,6 +56,7 @@
       // Encode the repository ID for the URL
       const encodedRepoId = encodeURIComponent(repoId);
 
+      // Fetch repository details
       const res = await fetch(`http://localhost:8000/repositories/${encodedRepoId}`);
 
       if (!res.ok) {
@@ -65,6 +66,21 @@
       repo = await res.json();
       tags = repo.tags || '';
       notes = repo.notes || '';
+
+      // Fetch versions using the new API endpoint
+      try {
+        const versionsRes = await fetch(`http://localhost:8000/api/get-versions?repo_id=${encodedRepoId}`);
+
+        if (versionsRes.ok) {
+          const versions = await versionsRes.json();
+          repo.versions = versions;
+          console.log('Versions fetched successfully:', versions);
+        } else {
+          console.error('Failed to fetch versions:', await versionsRes.text());
+        }
+      } catch (versionsErr) {
+        console.error('Error fetching versions:', versionsErr);
+      }
     } catch (err) {
       error = `Failed to fetch repository details: ${err.message}`;
       console.error(err);
@@ -140,6 +156,21 @@
 
         // Update the tags from the updated repository
         tags = repo.tags || '';
+
+        // Fetch versions using the new API endpoint
+        try {
+          const versionsRes = await fetch(`http://localhost:8000/api/get-versions?repo_id=${encodedRepoId}`);
+
+          if (versionsRes.ok) {
+            const versions = await versionsRes.json();
+            repo.versions = versions;
+            console.log('Versions fetched successfully after update:', versions);
+          } else {
+            console.error('Failed to fetch versions after update:', await versionsRes.text());
+          }
+        } catch (versionsErr) {
+          console.error('Error fetching versions after update:', versionsErr);
+        }
 
         updateStatus = '✅ Repository updated!';
 
@@ -300,8 +331,24 @@
       // Get the new version
       const newVersionData = await res.json();
 
-      // Add the new version to the list
-      repo.versions = [newVersionData, ...repo.versions];
+      // Fetch all versions to ensure we have the latest list
+      try {
+        const versionsRes = await fetch(`http://localhost:8000/api/get-versions?repo_id=${encodedRepoId}`);
+
+        if (versionsRes.ok) {
+          const versions = await versionsRes.json();
+          repo.versions = versions;
+          console.log('Versions fetched successfully after adding new version:', versions);
+        } else {
+          // If fetching all versions fails, just add the new one to the list
+          console.error('Failed to fetch versions after adding new version:', await versionsRes.text());
+          repo.versions = [newVersionData, ...repo.versions];
+        }
+      } catch (versionsErr) {
+        console.error('Error fetching versions after adding new version:', versionsErr);
+        // If fetching all versions fails, just add the new one to the list
+        repo.versions = [newVersionData, ...repo.versions];
+      }
 
       // Clear the form
       newVersion = '';

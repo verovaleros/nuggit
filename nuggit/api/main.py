@@ -24,6 +24,7 @@ app.include_router(repositories.router, prefix="/repositories", tags=["repositor
 app.include_router(detail.router, prefix="/repositories", tags=["repository detail"])
 app.include_router(versions.router, prefix="/repositories", tags=["versions"])
 app.include_router(versions.compare_router, prefix="/api", tags=["version comparison"])
+app.include_router(versions.versions_router, prefix="/api", tags=["versions"])
 
 @app.get("/")
 def read_root():

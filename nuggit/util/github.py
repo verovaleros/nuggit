@@ -1,12 +1,21 @@
 import re
 import time
-from os import getenv
+import os
 from github import Github
 from github.GithubException import GithubException
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
-load_dotenv()
+
+# Load environment variables from .env file
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
+
+# Get GitHub token from environment
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+if GITHUB_TOKEN:
+    logging.info(f"GitHub token loaded from environment: {GITHUB_TOKEN[:4]}...")
+else:
+    logging.warning("No GitHub token found in environment")
 
 # Suppress lower-level logs from PyGithub
 logging.getLogger("github").setLevel(logging.ERROR)
@@ -76,7 +85,10 @@ def get_repo_topics(repo):
         return []
 
 
-def get_repo_info(repo_owner, repo_name, token=getenv("GITHUB_TOKEN")):
+def get_repo_info(repo_owner, repo_name, token=None):
+    # Use the global token if none is provided
+    if token is None:
+        token = GITHUB_TOKEN
     """
     Get information about a GitHub repository.
     Args:
