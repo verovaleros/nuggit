@@ -69,9 +69,9 @@
       allRepos = data.repositories;
       console.log('Total repositories loaded:', allRepos.length);
 
-      // Initialize filteredRepos with all repositories
-      filteredRepos = [...allRepos];
-      console.log('Initial filteredRepos length:', filteredRepos.length);
+      // Initialize filteredRepos with all repositories, properly sorted
+      filteredRepos = sortRepositories([...allRepos]);
+      console.log('Initial filteredRepos length:', filteredRepos.length, 'sorted by', sortField, sortOrder);
 
       // Initialize to show the first page
       currentDisplayCount = pageSize;
@@ -142,18 +142,16 @@
     console.log(`Now showing up to ${currentDisplayCount} repositories`);
   }
 
-  // Calculate filtered and sorted repositories
-  $: filteredRepos = sortRepositories(allRepos.filter(matchesSearch));
+  // Unified reactive statement to handle filtering and sorting
+  $: {
+    // Filter repositories based on search term
+    const filtered = allRepos.filter(matchesSearch);
 
-  // Log when filtered repos change
-  $: console.log(`Showing ${filteredRepos.length} repositories, sorted by ${sortField} (${sortOrder})`);
+    // Sort the filtered repositories
+    filteredRepos = sortRepositories(filtered);
 
-  // Make sure the reactive statement is triggered when searchTerm changes
-  $: searchTerm, recalculateFiltered();
-
-  function recalculateFiltered() {
-    console.log('Search term changed to:', searchTerm);
-    filteredRepos = sortRepositories(allRepos.filter(matchesSearch));
+    // Log the result
+    console.log(`Showing ${filteredRepos.length} repositories, sorted by ${sortField} (${sortOrder})`);
   }
 
   // Reset display count when search term changes
@@ -163,22 +161,18 @@
     currentDisplayCount = pageSize;
   }
 
-  // Re-sort when sort options change
-  $: if (sortField || sortOrder) {
-    // The reactive statement above will handle the actual sorting
-    // This is just to ensure the statement runs when sort options change
-    console.log(`Sort options changed: ${sortField} (${sortOrder})`);
-  }
-
   function filterByTag(tag) {
     searchTerm = tag;
     currentTab = 'repos';
   }
 
   function changeSort(field) {
+    console.log(`Changing sort to field: ${field} (current: ${sortField}, ${sortOrder})`);
+
     // If clicking on the same field, toggle the sort order
     if (field === sortField) {
       sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+      console.log(`Toggled sort order to: ${sortOrder}`);
     } else {
       // If clicking on a different field, set it as the new sort field
       // and reset the sort order based on the field type
@@ -192,7 +186,11 @@
         // For text fields, default to ascending (A-Z)
         sortOrder = 'asc';
       }
+      console.log(`Set sort order to: ${sortOrder} for field: ${field}`);
     }
+
+    // Force update of filteredRepos
+    filteredRepos = sortRepositories(allRepos.filter(matchesSearch));
   }
 
   function formatDate(dateString) {
@@ -245,8 +243,8 @@
 
       const data = await fetch('http://localhost:8000/repositories/').then(r => r.json());
       allRepos = data.repositories;
-      // Update filteredRepos based on current search term
-      filteredRepos = allRepos.filter(matchesSearch);
+      // Update filteredRepos based on current search term and sort settings
+      filteredRepos = sortRepositories(allRepos.filter(matchesSearch));
 
       const encoded = btoa(repo_id);
       window.location.hash = `#/repo/${encoded}`;
@@ -303,8 +301,8 @@
       // Refresh the repository list
       const reposData = await fetch('http://localhost:8000/repositories/').then(r => r.json());
       allRepos = reposData.repositories;
-      // Update filteredRepos based on current search term
-      filteredRepos = allRepos.filter(matchesSearch);
+      // Update filteredRepos based on current search term and sort settings
+      filteredRepos = sortRepositories(allRepos.filter(matchesSearch));
 
     } catch (err) {
       console.error(err);
@@ -604,7 +602,7 @@
     {#if allRepos.length === 0}
       <p class="center">Loading repositories...</p>
     {:else}
-      {#key currentDisplayCount + searchTerm}
+      {#key currentDisplayCount + searchTerm + sortField + sortOrder}
         <table>
           <thead>
             <tr>
