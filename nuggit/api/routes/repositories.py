@@ -12,15 +12,21 @@ DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "n
 
 @router.get("/", summary="List all repositories")
 def get_repositories():
-    repos = list_all_repositories()
-    return {"repositories": repos}
+    """
+    List all repositories in the database.
 
+    Returns:
+        dict: A dictionary containing a list of all repositories.
 
-@router.post("/", summary="Fetch and store repository metadata from GitHub")
-def add_repository(repo: dict = Body(...)):
-    repo_id = repo.get("id")
-    if not repo_id:
-        raise HTTPException(status_code=400, detail="Missing repository ID")
+    Raises:
+        HTTPException: If there is an error fetching the repositories.
+    """
+    try:
+        repos = list_all_repositories()
+        return {"repositories": repos}
+    except Exception as e:
+        logging.error(f"Error listing repositories: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to list repositories: {str(e)}")
 
     try:
         owner, name = repo_id.strip().split('/')
