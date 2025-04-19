@@ -28,6 +28,31 @@ def get_repositories():
         logging.error(f"Error listing repositories: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to list repositories: {str(e)}")
 
+
+@router.get("/check/{repo_id:path}", summary="Check if a repository exists")
+def check_repository(repo_id: str):
+    """
+    Check if a repository exists in the database.
+
+    Args:
+        repo_id (str): The ID of the repository to check.
+
+    Returns:
+        dict: A dictionary indicating whether the repository exists.
+
+    Raises:
+        HTTPException: If there is an error checking the repository.
+    """
+    try:
+        repo = get_repository(repo_id)
+        return {
+            "exists": repo is not None,
+            "repository": repo if repo else None
+        }
+    except Exception as e:
+        logging.error(f"Error checking repository {repo_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to check repository: {str(e)}")
+
     try:
         owner, name = repo_id.strip().split('/')
     except ValueError:
