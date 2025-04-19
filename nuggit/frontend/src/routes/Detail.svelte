@@ -13,6 +13,16 @@
   let showDeleteConfirm = false;
   let deleteError = '';
 
+  // Comments
+  let newComment = '';
+  let commentAuthor = 'Anonymous';
+  let commentStatus = '';
+  let addingComment = false;
+
+  // Collapsible sections
+  let commentsCollapsed = true;
+  let commitsCollapsed = true;
+
   onMount(async () => {
     const hash = window.location.hash;
     const parts = hash.split('/');
@@ -47,13 +57,13 @@
   async function saveMetadata() {
     saveStatus = 'Saving...';
     try {
-      // Use the metadata endpoint for updating tags and notes
+      // Use the metadata endpoint for updating tags
       const res = await fetch(`http://localhost:8000/repositories/${repoId}/metadata`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ tags, notes })
+        body: JSON.stringify({ tags, notes: '' }) // Keep notes parameter for API compatibility
       });
 
       if (!res.ok) {
@@ -127,6 +137,61 @@
   function cancelDelete() {
     showDeleteConfirm = false;
     deleteError = '';
+  }
+
+  function toggleComments() {
+    commentsCollapsed = !commentsCollapsed;
+  }
+
+  function toggleCommits() {
+    commitsCollapsed = !commitsCollapsed;
+  }
+
+  async function addComment() {
+    if (!newComment.trim()) {
+      commentStatus = 'Please enter a comment.';
+      return;
+    }
+
+    addingComment = true;
+    commentStatus = 'Adding comment...';
+
+    try {
+      const res = await fetch(`http://localhost:8000/repositories/${repoId}/comments`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          comment: newComment.trim(),
+          author: commentAuthor.trim() || 'Anonymous'
+        })
+      });
+
+      if (!res.ok) {
+        throw new Error(await res.text());
+      }
+
+      // Get the new comment
+      const newCommentData = await res.json();
+
+      // Add the new comment to the list
+      repo.comments = [newCommentData, ...repo.comments];
+
+      // Clear the form
+      newComment = '';
+      commentStatus = '✅ Comment added!';
+
+      // Clear the status after 3 seconds
+      setTimeout(() => {
+        commentStatus = '';
+      }, 3000);
+    } catch (err) {
+      console.error(err);
+      commentStatus = `❌ Failed to add comment: ${err.message}`;
+    } finally {
+      addingComment = false;
+    }
   }
 </script>
 
@@ -264,6 +329,110 @@
     background-color: #ef4444;
   }
 
+  /* Comments styles */
+  .comments-section {
+    margin-top: 2rem;
+  }
+
+  .comments-list {
+    margin-top: 1rem;
+  }
+
+  .comment {
+    background-color: #f9fafb;
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  .comment-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+    color: #6b7280;
+  }
+
+  .comment-author {
+    font-weight: bold;
+  }
+
+  .comment-content {
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .comment-form {
+    margin-top: 1rem;
+    background-color: #f9fafb;
+    border-radius: 8px;
+    padding: 1rem;
+  }
+
+  .comment-form textarea {
+    width: 100%;
+    min-height: 100px;
+    margin-bottom: 0.5rem;
+  }
+
+  .comment-form-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+
+  .comment-form-header input {
+    width: 200px;
+  }
+
+  .comment-status {
+    margin-top: 0.5rem;
+    text-align: center;
+    font-style: italic;
+  }
+
+  /* Collapsible section styles */
+  .section-header {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+    margin-top: 2rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .section-header h2 {
+    margin: 0;
+    flex-grow: 1;
+  }
+
+  .section-header .toggle-icon {
+    font-size: 1.2rem;
+    transition: transform 0.2s ease;
+  }
+
+  .section-header .toggle-icon.collapsed {
+    transform: rotate(-90deg);
+  }
+
+  .section-content {
+    overflow: hidden;
+    transition: max-height 0.3s ease, opacity 0.3s ease;
+    max-height: 2000px;
+    opacity: 1;
+  }
+
+  .section-content.collapsed {
+    max-height: 0;
+    opacity: 0;
+    margin: 0;
+    padding: 0;
+  }
+
   .nav-back {
     display: flex;
     justify-content: space-between;
@@ -324,16 +493,13 @@
           <th>Tags</th>
           <td><input type="text" bind:value={tags} placeholder="Comma-separated tags" /></td>
         </tr>
-        <tr>
-          <th>Notes</th>
-          <td><textarea bind:value={notes} rows="4" placeholder="Write your notes here…"></textarea></td>
-        </tr>
+
         <tr><th>GitHub</th><td><a href={repo.url} target="_blank">{repo.url}</a></td></tr>
       </tbody>
     </table>
 
     <div style="text-align: center; margin-top: 1rem;">
-      <button on:click={saveMetadata}>💾 Save Tags & Notes</button>
+      <button on:click={saveMetadata}>💾 Save Tags</button>
       {#if saveStatus}<p class="save-status">{saveStatus}</p>{/if}
     </div>
 
@@ -362,30 +528,90 @@
       </div>
     {/if}
 
-    <h2>🕘 Recent Commits</h2>
-    {#if repo.recent_commits.length > 0}
-      <table>
-        <thead>
-          <tr>
-            <th>SHA</th>
-            <th>Author</th>
-            <th>Date</th>
-            <th>Message</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each repo.recent_commits as commit}
-            <tr>
-              <td>{commit.sha}</td>
-              <td>{commit.author}</td>
-              <td>{commit.date}</td>
-              <td>{commit.message}</td>
-            </tr>
+    <!-- Comments Section (Collapsible) -->
+    <div class="section-header" on:click={toggleComments}>
+      <h2>💬 Comments</h2>
+      <span class="toggle-icon {commentsCollapsed ? 'collapsed' : ''}">▾</span>
+    </div>
+
+    <div class="section-content {commentsCollapsed ? 'collapsed' : ''}">
+      <!-- Comment form -->
+      <div class="comment-form">
+        <div class="comment-form-header">
+          <label for="comment-author">Your name:</label>
+          <input
+            type="text"
+            id="comment-author"
+            bind:value={commentAuthor}
+            placeholder="Anonymous"
+          />
+        </div>
+
+        <textarea
+          bind:value={newComment}
+          placeholder="Add a comment..."
+        ></textarea>
+
+        <div style="text-align: right;">
+          <button on:click={addComment} disabled={addingComment}>
+            {addingComment ? 'Adding...' : '💬 Add Comment'}
+          </button>
+        </div>
+
+        {#if commentStatus}
+          <p class="comment-status">{commentStatus}</p>
+        {/if}
+      </div>
+
+      <!-- Comments list -->
+      <div class="comments-list">
+        {#if repo.comments && repo.comments.length > 0}
+          {#each repo.comments as comment}
+            <div class="comment">
+              <div class="comment-header">
+                <span class="comment-author">{comment.author}</span>
+                <span class="comment-date">{new Date(comment.created_at).toLocaleString()}</span>
+              </div>
+              <div class="comment-content">{comment.comment}</div>
+            </div>
           {/each}
-        </tbody>
-      </table>
-    {:else}
-      <p style="text-align: center;">No recent commits found.</p>
-    {/if}
+        {:else}
+          <p style="text-align: center;">No comments yet. Be the first to comment!</p>
+        {/if}
+      </div>
+    </div>
+
+    <!-- Recent Commits Section (Collapsible) -->
+    <div class="section-header" on:click={toggleCommits}>
+      <h2>🕘 Recent Commits</h2>
+      <span class="toggle-icon {commitsCollapsed ? 'collapsed' : ''}">▾</span>
+    </div>
+
+    <div class="section-content {commitsCollapsed ? 'collapsed' : ''}">
+      {#if repo.recent_commits.length > 0}
+        <table>
+          <thead>
+            <tr>
+              <th>SHA</th>
+              <th>Author</th>
+              <th>Date</th>
+              <th>Message</th>
+            </tr>
+          </thead>
+          <tbody>
+            {#each repo.recent_commits as commit}
+              <tr>
+                <td>{commit.sha}</td>
+                <td>{commit.author}</td>
+                <td>{commit.date}</td>
+                <td>{commit.message}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
+      {:else}
+        <p style="text-align: center;">No recent commits found.</p>
+      {/if}
+    </div>
   {/if}
 </div>

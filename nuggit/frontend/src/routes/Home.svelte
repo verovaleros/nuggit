@@ -18,6 +18,7 @@
   }
 
   let allRepos = [];
+  let filteredRepos = [];
   let pageSize = 10; // Smaller page size to make pagination more visible
   let currentDisplayCount = pageSize;
   let searchTerm = '';
@@ -64,6 +65,10 @@
       allRepos = data.repositories;
       console.log('Total repositories loaded:', allRepos.length);
 
+      // Initialize filteredRepos with all repositories
+      filteredRepos = [...allRepos];
+      console.log('Initial filteredRepos length:', filteredRepos.length);
+
       // Initialize to show the first page
       currentDisplayCount = pageSize;
     } catch (error) {
@@ -77,14 +82,25 @@
   }
 
   function matchesSearch(repo) {
-    const lower = searchTerm.toLowerCase();
-    return (
-      repo.name?.toLowerCase().includes(lower) ||
-      repo.description?.toLowerCase().includes(lower) ||
-      repo.id?.toLowerCase().includes(lower) ||
-      repo.tags?.toLowerCase().includes(lower) ||
-      repo.notes?.toLowerCase().includes(lower)
-    );
+    // If search term is empty, return all repositories
+    if (!searchTerm || searchTerm.trim() === '') {
+      return true;
+    }
+
+    const lower = searchTerm.toLowerCase().trim();
+    console.log('Searching for:', lower);
+    console.log('Checking repo:', repo.name);
+
+    // Check each field with proper null handling
+    const nameMatch = repo.name ? repo.name.toLowerCase().includes(lower) : false;
+    const descMatch = repo.description ? repo.description.toLowerCase().includes(lower) : false;
+    const idMatch = repo.id ? repo.id.toLowerCase().includes(lower) : false;
+    const tagsMatch = repo.tags ? repo.tags.toLowerCase().includes(lower) : false;
+
+    const isMatch = nameMatch || descMatch || idMatch || tagsMatch;
+    console.log('Is match:', isMatch);
+
+    return isMatch;
   }
 
   function loadNextPage() {
@@ -94,7 +110,12 @@
   }
 
   // Calculate filtered repositories based on search term
-  $: filteredRepos = allRepos.filter(matchesSearch);
+  $: {
+    console.log('Recalculating filteredRepos, searchTerm:', searchTerm);
+    console.log('allRepos length:', allRepos.length);
+    filteredRepos = allRepos.filter(matchesSearch);
+    console.log('filteredRepos length:', filteredRepos.length);
+  }
 
   // Reset display count when search term changes
   $: if (searchTerm !== undefined) {
@@ -135,6 +156,8 @@
 
       const data = await fetch('http://localhost:8000/repositories/').then(r => r.json());
       allRepos = data.repositories;
+      // Update filteredRepos based on current search term
+      filteredRepos = allRepos.filter(matchesSearch);
 
       const encoded = btoa(repo_id);
       window.location.hash = `#/repo/${encoded}`;
@@ -191,6 +214,8 @@
       // Refresh the repository list
       const reposData = await fetch('http://localhost:8000/repositories/').then(r => r.json());
       allRepos = reposData.repositories;
+      // Update filteredRepos based on current search term
+      filteredRepos = allRepos.filter(matchesSearch);
 
     } catch (err) {
       console.error(err);

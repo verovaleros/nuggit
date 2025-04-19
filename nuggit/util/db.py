@@ -3,7 +3,7 @@
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 
 DB_PATH = Path(__file__).resolve().parent.parent / "nuggit.db"
@@ -50,6 +50,18 @@ def initialize_database():
             old_value TEXT,
             new_value TEXT,
             changed_at TEXT NOT NULL,
+            FOREIGN KEY (repo_id) REFERENCES repositories(id)
+        )
+        """)
+
+        # Create comments table
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS repository_comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            repo_id TEXT NOT NULL,
+            comment TEXT NOT NULL,
+            author TEXT DEFAULT 'Anonymous',
+            created_at TEXT NOT NULL,
             FOREIGN KEY (repo_id) REFERENCES repositories(id)
         )
         """)
@@ -185,8 +197,69 @@ def delete_repository(repo_id: str) -> bool:
         # Delete repository history first (foreign key constraint)
         cursor.execute("DELETE FROM repository_history WHERE repo_id = ?", (repo_id,))
 
+        # Delete repository comments
+        cursor.execute("DELETE FROM repository_comments WHERE repo_id = ?", (repo_id,))
+
         # Delete the repository
         cursor.execute("DELETE FROM repositories WHERE id = ?", (repo_id,))
 
         # Return True if at least one row was affected
         return cursor.rowcount > 0
+
+
+def add_comment(repo_id: str, comment: str, author: str = "Anonymous") -> int:
+    """
+    Add a comment to a repository.
+
+    Args:
+        repo_id (str): The ID of the repository.
+        comment (str): The comment text.
+        author (str, optional): The author of the comment. Defaults to "Anonymous".
+
+    Returns:
+        int: The ID of the newly added comment.
+
+    Raises:
+        sqlite3.Error: If there is a database error.
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        # Get current timestamp in ISO format
+        created_at = datetime.utcnow().isoformat()
+
+        # Insert the comment
+        cursor.execute(
+            "INSERT INTO repository_comments (repo_id, comment, author, created_at) VALUES (?, ?, ?, ?)",
+            (repo_id, comment, author, created_at)
+        )
+
+        # Get the ID of the newly inserted comment
+        return cursor.lastrowid
+
+
+def get_comments(repo_id: str) -> List[Dict[str, Any]]:
+    """
+    Get all comments for a repository.
+
+    Args:
+        repo_id (str): The ID of the repository.
+
+    Returns:
+        List[Dict[str, Any]]: A list of dictionaries containing comment information.
+
+    Raises:
+        sqlite3.Error: If there is a database error.
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        # Get all comments for the repository, ordered by creation time (newest first)
+        cursor.execute(
+            "SELECT id, comment, author, created_at FROM repository_comments WHERE repo_id = ? ORDER BY created_at DESC",
+            (repo_id,)
+        )
+
+        # Convert the results to a list of dictionaries
+        columns = [column[0] for column in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
