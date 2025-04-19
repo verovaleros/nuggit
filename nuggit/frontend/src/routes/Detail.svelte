@@ -93,18 +93,31 @@
         throw new Error(await res.text());
       }
 
-      const data = await res.json();
-      repo = data.repository;
-      updateStatus = '✅ Repository updated!';
+      // After successful update, fetch the repository details again to get the latest data
+      // including comments and recent commits
+      try {
+        const detailRes = await fetch(`http://localhost:8000/repositories/${repoId}`);
 
-      // Update the tags and notes from the updated repository
-      tags = repo.tags || '';
-      notes = repo.notes || '';
+        if (!detailRes.ok) {
+          throw new Error(await detailRes.text());
+        }
 
-      // Clear the status after 3 seconds
-      setTimeout(() => {
-        updateStatus = '';
-      }, 3000);
+        // Update the repository data with the latest information
+        repo = await detailRes.json();
+
+        // Update the tags from the updated repository
+        tags = repo.tags || '';
+
+        updateStatus = '✅ Repository updated!';
+
+        // Clear the status after 3 seconds
+        setTimeout(() => {
+          updateStatus = '';
+        }, 3000);
+      } catch (detailErr) {
+        console.error('Error fetching updated repository details:', detailErr);
+        updateStatus = '✅ Repository updated, but failed to refresh details.';
+      }
     } catch (err) {
       console.error(err);
       updateStatus = `❌ Failed to update: ${err.message}`;
@@ -122,7 +135,7 @@
       }
 
       // Redirect to home page after successful deletion
-      window.location.hash = '#/';
+      window.location.hash = '';
     } catch (err) {
       console.error(err);
       deleteError = `Failed to delete repository: ${err.message}`;
@@ -464,7 +477,7 @@
 
 <div class="container">
   <div class="nav-back">
-    <button on:click={() => (window.location.hash = '#/')}>&larr; Back to Home</button>
+    <button on:click={() => (window.location.hash = '')}>&larr; Back to Home</button>
     <button class="add-repo" on:click={() => (window.location.hash = '#/?tab=add')}>➕ Add Repo</button>
   </div>
   {#if loading}
