@@ -55,7 +55,8 @@ def initialize_database():
         """)
 
 def insert_or_update_repo(repo_data: Dict[str, Any]):
-    repo_data['last_synced'] = datetime.utcnow().isoformat()
+    repo_data.setdefault('last_synced', datetime.utcnow().isoformat())
+
     with get_connection() as conn:
         cursor = conn.cursor()
 
@@ -79,12 +80,13 @@ def insert_or_update_repo(repo_data: Dict[str, Any]):
                         repo_data['last_synced']
                     ))
 
+
         cursor.execute("""
         INSERT INTO repositories (
-            id, name, description, url, topics, license, created_at, updated_at, 
+            id, name, description, url, topics, license, created_at, updated_at,
             stars, forks, issues, contributors, commits, last_commit, tags, notes, last_synced
         ) VALUES (
-            :id, :name, :description, :url, :topics, :license, :created_at, :updated_at, 
+            :id, :name, :description, :url, :topics, :license, :created_at, :updated_at,
             :stars, :forks, :issues, :contributors, :commits, :last_commit, :tags, :notes, :last_synced
         )
         ON CONFLICT(id) DO UPDATE SET
@@ -101,8 +103,11 @@ def insert_or_update_repo(repo_data: Dict[str, Any]):
             contributors = excluded.contributors,
             commits = excluded.commits,
             last_commit = excluded.last_commit,
+            tags = excluded.tags,
+            notes = excluded.notes,
             last_synced = excluded.last_synced
         """, repo_data)
+
 
 def tag_repository(repo_id: str, tag: str):
     with get_connection() as conn:
@@ -154,11 +159,34 @@ def get_repository_history(repo_id: str) -> list[Dict[str, Any]]:
         return [dict(zip(columns, row)) for row in rows]
 
 def update_repository_metadata(repo_id: str, tags: str, notes: str) -> bool:
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE repositories SET tags = ?, notes = ? WHERE id = ?", (tags, notes, repo_id))
+        success = cursor.rowcount > 0
+        return success
 
-    cursor.execute("UPDATE repositories SET tags = ?, notes = ? WHERE id = ?", (tags, notes, repo_id))
-    conn.commit()
-    success = cursor.rowcount > 0
-    conn.close()
-    return success
+
+def delete_repository(repo_id: str) -> bool:
+    """
+    Delete a repository and its history from the database.
+
+    Args:
+        repo_id (str): The ID of the repository to delete.
+
+    Returns:
+        bool: True if the repository was deleted, False if it was not found.
+
+    Raises:
+        sqlite3.Error: If there is a database error.
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        # Delete repository history first (foreign key constraint)
+        cursor.execute("DELETE FROM repository_history WHERE repo_id = ?", (repo_id,))
+
+        # Delete the repository
+        cursor.execute("DELETE FROM repositories WHERE id = ?", (repo_id,))
+
+        # Return True if at least one row was affected
+        return cursor.rowcount > 0
