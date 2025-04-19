@@ -28,6 +28,12 @@
   let addStatus = '';
   let isAdding = false;
 
+  // Batch add repos
+  let batchRepoIds = '';
+  let batchAddStatus = '';
+  let isBatchAdding = false;
+  let batchResults = null;
+
   // Tags and stats
   $: allTags = Array.from(
     new Set(
@@ -128,6 +134,60 @@
       addStatus = `❌ Error: ${err.message}`;
     } finally {
       isAdding = false;
+    }
+  }
+
+  async function addBatchRepos() {
+    if (!batchRepoIds.trim()) {
+      batchAddStatus = 'Please enter at least one repository ID.';
+      return;
+    }
+
+    // Parse the input into an array of repository IDs
+    const repoIds = batchRepoIds
+      .split('\n')
+      .map(id => id.trim())
+      .filter(id => id.length > 0);
+
+    if (repoIds.length === 0) {
+      batchAddStatus = 'Please enter at least one valid repository ID.';
+      return;
+    }
+
+    isBatchAdding = true;
+    batchAddStatus = 'Adding repositories...';
+    batchResults = null;
+
+    try {
+      const res = await fetch('http://localhost:8000/repositories/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repositories: repoIds })
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText);
+      }
+
+      const data = await res.json();
+      batchResults = data;
+      batchAddStatus = data.message;
+
+      // If all repositories were added successfully, clear the input
+      if (data.results.failed.length === 0) {
+        batchRepoIds = '';
+      }
+
+      // Refresh the repository list
+      const reposData = await fetch('http://localhost:8000/repositories/').then(r => r.json());
+      allRepos = reposData.repositories;
+
+    } catch (err) {
+      console.error(err);
+      batchAddStatus = `❌ Error: ${err.message}`;
+    } finally {
+      isBatchAdding = false;
     }
   }
 </script>
@@ -297,6 +357,75 @@
   .add-repo-button:hover {
     background-color: #374151;
   }
+
+  .batch-textarea {
+    width: 100%;
+    max-width: 500px;
+    height: 150px;
+    margin-top: 1rem;
+    padding: 0.8rem;
+    font-size: 1rem;
+    font-family: monospace;
+    border-radius: 6px;
+    border: 1px solid #ccc;
+    resize: vertical;
+  }
+
+  .batch-results {
+    margin-top: 1.5rem;
+    text-align: left;
+    max-width: 500px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .batch-results h3 {
+    margin-bottom: 0.5rem;
+  }
+
+  .success-list, .failed-list {
+    margin-top: 0.5rem;
+    padding: 1rem;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 0.9rem;
+  }
+
+  .success-list {
+    background-color: #ecfdf5;
+    border: 1px solid #10b981;
+  }
+
+  .failed-list {
+    background-color: #fef2f2;
+    border: 1px solid #ef4444;
+  }
+
+  .repo-item {
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid rgba(0,0,0,0.1);
+  }
+
+  .repo-item:last-child {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+  }
+
+  .error-message {
+    color: #ef4444;
+    font-style: italic;
+  }
+
+  .tabs-content {
+    animation: fadeIn 0.3s ease-in-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
 </style>
 
 <div class="container">
@@ -378,22 +507,78 @@
     </div>
 
   {:else if currentTab === 'add'}
-    <div class="center">
+    <div class="center tabs-content">
       <h2>➕ Add Repository</h2>
-      <input
-        type="text"
-        placeholder="username/repo"
-        bind:value={newRepoId}
-        style="width: 300px; margin-top: 1rem; font-size: 1rem;"
-      />
-      <div style="margin-top: 1rem;">
-        <button class="add-repo-button" on:click={addRepo} disabled={isAdding}>
-        Add Repository
-        </button>
+
+      <!-- Single Repository Add Section -->
+      <div style="margin-bottom: 3rem;">
+        <h3>Add Single Repository</h3>
+        <input
+          type="text"
+          placeholder="username/repo"
+          bind:value={newRepoId}
+          style="width: 300px; margin-top: 1rem; font-size: 1rem;"
+        />
+        <div style="margin-top: 1rem;">
+          <button class="add-repo-button" on:click={addRepo} disabled={isAdding}>
+            {isAdding ? 'Adding...' : 'Add Repository'}
+          </button>
+        </div>
+        {#if addStatus}
+          <p style="margin-top: 1rem;">{addStatus}</p>
+        {/if}
       </div>
-      {#if addStatus}
-        <p style="margin-top: 1rem;">{addStatus}</p>
-      {/if}
+
+      <!-- Batch Add Section -->
+      <div>
+        <h3>Batch Add Repositories</h3>
+        <p>Enter one repository ID per line (format: username/repo)</p>
+        <textarea
+          class="batch-textarea"
+          placeholder="username1/repo1
+username2/repo2
+username3/repo3"
+          bind:value={batchRepoIds}
+        ></textarea>
+        <div style="margin-top: 1rem;">
+          <button class="add-repo-button" on:click={addBatchRepos} disabled={isBatchAdding}>
+            {isBatchAdding ? 'Adding...' : 'Add Repositories'}
+          </button>
+        </div>
+        {#if batchAddStatus}
+          <p style="margin-top: 1rem;">{batchAddStatus}</p>
+        {/if}
+
+        <!-- Batch Results -->
+        {#if batchResults}
+          <div class="batch-results">
+            <!-- Successful Repositories -->
+            {#if batchResults.results.successful.length > 0}
+              <h3>✅ Successfully Added ({batchResults.results.successful.length})</h3>
+              <div class="success-list">
+                {#each batchResults.results.successful as repo}
+                  <div class="repo-item">
+                    <strong>{repo.id}</strong> - {repo.name}
+                  </div>
+                {/each}
+              </div>
+            {/if}
+
+            <!-- Failed Repositories -->
+            {#if batchResults.results.failed.length > 0}
+              <h3>❌ Failed to Add ({batchResults.results.failed.length})</h3>
+              <div class="failed-list">
+                {#each batchResults.results.failed as repo}
+                  <div class="repo-item">
+                    <strong>{repo.id}</strong>
+                    <div class="error-message">{repo.error}</div>
+                  </div>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
+      </div>
     </div>
   {/if}
 </div>
