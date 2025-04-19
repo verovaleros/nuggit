@@ -74,6 +74,12 @@ class RepositoryInput(BaseModel):
         if v and not (v.startswith('http://github.com/') or v.startswith('https://github.com/')):
             raise ValueError("URL must be a valid GitHub repository URL")
         return v
+
+class RepositoryResponse(BaseModel):
+    """Model for repository response."""
+    message: str
+    repository: dict
+
     try:
         owner, name = repo_id.strip().split('/')
     except ValueError:
