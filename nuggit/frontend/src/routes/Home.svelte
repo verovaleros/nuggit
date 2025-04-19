@@ -18,9 +18,8 @@
   }
 
   let allRepos = [];
-  let visibleRepos = [];
-  let pageSize = 20;
-  let currentPage = 1;
+  let pageSize = 10; // Smaller page size to make pagination more visible
+  let currentDisplayCount = pageSize;
   let searchTerm = '';
 
   // New repo
@@ -58,10 +57,18 @@
   };
 
   onMount(async () => {
-    const res = await fetch('http://localhost:8000/repositories/');
-    const data = await res.json();
-    allRepos = data.repositories;
-    loadNextPage();
+    try {
+      console.log('Fetching repositories...');
+      const res = await fetch('http://localhost:8000/repositories/');
+      const data = await res.json();
+      allRepos = data.repositories;
+      console.log('Total repositories loaded:', allRepos.length);
+
+      // Initialize to show the first page
+      currentDisplayCount = pageSize;
+    } catch (error) {
+      console.error('Error loading repositories:', error);
+    }
   });
 
   function goToDetail(id) {
@@ -81,17 +88,19 @@
   }
 
   function loadNextPage() {
-    const filtered = allRepos.filter(matchesSearch);
-    const start = (currentPage - 1) * pageSize;
-    const end = start + pageSize;
-    visibleRepos = filtered.slice(0, end);
-    currentPage++;
+    // Simply increase the number of repositories to display
+    currentDisplayCount += pageSize;
+    console.log(`Now showing up to ${currentDisplayCount} repositories`);
   }
 
-  $: {
-    currentPage = 1;
-    const filtered = searchTerm ? allRepos.filter(matchesSearch) : allRepos;
-    visibleRepos = filtered.slice(0, pageSize * currentPage);
+  // Calculate filtered repositories based on search term
+  $: filteredRepos = allRepos.filter(matchesSearch);
+
+  // Reset display count when search term changes
+  $: if (searchTerm !== undefined) {
+    console.log('Search term changed to:', searchTerm);
+    // Reset to show only the first page when search changes
+    currentDisplayCount = pageSize;
   }
 
   function filterByTag(tag) {
@@ -450,35 +459,42 @@
       {/if}
     </div>
 
-    {#if visibleRepos.length === 0}
+    <!-- Get filtered repositories based on search term -->
+    {#if allRepos.length === 0}
       <p class="center">Loading repositories...</p>
     {:else}
-      <table>
-        <thead>
-          <tr>
-            <th>Name</th>
-            <th>Description</th>
-            <th>License</th>
-            <th>Stars</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each visibleRepos as repo}
-            <tr on:click={() => goToDetail(repo.id)}>
-              <td>{repo.name}</td>
-              <td>{repo.description}</td>
-              <td>{repo.license}</td>
-              <td>{repo.stars}</td>
+      {#key currentDisplayCount + searchTerm}
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Description</th>
+              <th>License</th>
+              <th>Stars</th>
             </tr>
-          {/each}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {#each filteredRepos.slice(0, currentDisplayCount) as repo (repo.id)}
+              <tr on:click={() => goToDetail(repo.id)}>
+                <td>{repo.name}</td>
+                <td>{repo.description}</td>
+                <td>{repo.license}</td>
+                <td>{repo.stars}</td>
+              </tr>
+            {/each}
+          </tbody>
+        </table>
 
-      {#if visibleRepos.length < allRepos.filter(matchesSearch).length}
         <div class="center">
-          <button class="load-more" on:click={loadNextPage}>Load more</button>
+          {#if currentDisplayCount < filteredRepos.length}
+            <button class="load-more" on:click={loadNextPage}>Load more</button>
+          {/if}
+
+          <div style="margin-top: 1rem; font-size: 0.8rem; color: #666;">
+            Showing {Math.min(currentDisplayCount, filteredRepos.length)} of {filteredRepos.length} repositories
+          </div>
         </div>
-      {/if}
+      {/key}
     {/if}
 
   {:else if currentTab === 'tags'}
