@@ -17,6 +17,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import the module to test
 from nuggit.util import db
+from typing import Dict, Any
 
 
 class TestDatabase(unittest.TestCase):
@@ -242,6 +243,45 @@ class TestDatabase(unittest.TestCase):
         success = db.update_repository_metadata("nonexistent/repo", new_tags, new_notes)
         self.assertFalse(success)
 
+    def test_update_repository_fields(self):
+        """Test updating specific repository fields."""
+        # Insert a repository
+        db.insert_or_update_repo(self.sample_repo)
+
+        # Fields to update
+        fields: Dict[str, Any] = {
+            "license": "Apache 2.0",
+            "stars": 20,
+            "topics": "test, updated, fields",
+            "commits": 150
+        }
+
+        # Update fields
+        success = db.update_repository_fields(self.sample_repo["id"], fields)
+
+        # Verify the update was successful
+        self.assertTrue(success)
+
+        # Verify the fields were updated
+        repo = db.get_repository(self.sample_repo["id"])
+        self.assertEqual(repo["license"], fields["license"])
+        self.assertEqual(int(repo["stars"]), fields["stars"])
+        self.assertEqual(repo["topics"], fields["topics"])
+        self.assertEqual(int(repo["commits"]), fields["commits"])
+
+        # Verify history was recorded
+        history = db.get_repository_history(self.sample_repo["id"])
+
+        # Check that each field change was recorded
+        for field in fields:
+            field_history = [h for h in history if h["field"] == field]
+            self.assertGreater(len(field_history), 0, f"No history entry for {field}")
+            self.assertEqual(field_history[0]["new_value"], str(fields[field]))
+
+        # Test updating a non-existent repository
+        success = db.update_repository_fields("nonexistent/repo", fields)
+        self.assertFalse(success)
+
     def test_delete_repository(self):
         """Test deleting a repository."""
         # Insert a repository
@@ -328,12 +368,15 @@ class TestDatabaseWithMocks(unittest.TestCase):
         db.initialize_database()
 
         # Verify the cursor.execute was called with the correct SQL
-        self.assertEqual(self.mock_cursor.execute.call_count, 2)
-        create_repositories_call = self.mock_cursor.execute.call_args_list[0][0][0]
-        create_history_call = self.mock_cursor.execute.call_args_list[1][0][0]
+        # The number of calls may change as tables are added to the schema
+        self.assertGreaterEqual(self.mock_cursor.execute.call_count, 2)
 
-        self.assertIn("CREATE TABLE IF NOT EXISTS repositories", create_repositories_call)
-        self.assertIn("CREATE TABLE IF NOT EXISTS repository_history", create_history_call)
+        # Check that the required tables are created
+        create_calls = [call[0][0] for call in self.mock_cursor.execute.call_args_list]
+        self.assertTrue(any("CREATE TABLE IF NOT EXISTS repositories" in call for call in create_calls))
+        self.assertTrue(any("CREATE TABLE IF NOT EXISTS repository_history" in call for call in create_calls))
+        self.assertTrue(any("CREATE TABLE IF NOT EXISTS repository_comments" in call for call in create_calls))
+        self.assertTrue(any("CREATE TABLE IF NOT EXISTS repository_versions" in call for call in create_calls))
 
     def test_insert_or_update_repo_with_mock(self):
         """Test insert_or_update_repo with mocks."""
@@ -368,17 +411,26 @@ class TestDatabaseWithMocks(unittest.TestCase):
         self.assertTrue(result)
 
         # Verify the cursor.execute was called with the correct SQL
-        self.assertEqual(self.mock_cursor.execute.call_count, 2)
+        # The number of calls may change as tables are added to the schema
+        self.assertGreaterEqual(self.mock_cursor.execute.call_count, 2)
 
-        # Check the DELETE from history query
-        delete_history_call = self.mock_cursor.execute.call_args_list[0][0]
-        self.assertIn("DELETE FROM repository_history WHERE repo_id = ?", delete_history_call[0])
-        self.assertEqual(delete_history_call[1], (self.sample_repo["id"],))
+        # Check that the required DELETE operations are performed
+        delete_calls = [call[0][0] for call in self.mock_cursor.execute.call_args_list]
+        delete_params = [call[0][1] if len(call[0]) > 1 else None for call in self.mock_cursor.execute.call_args_list]
 
-        # Check the DELETE from repositories query
-        delete_repo_call = self.mock_cursor.execute.call_args_list[1][0]
-        self.assertIn("DELETE FROM repositories WHERE id = ?", delete_repo_call[0])
-        self.assertEqual(delete_repo_call[1], (self.sample_repo["id"],))
+        # Check for repository history deletion
+        self.assertTrue(any("DELETE FROM repository_history WHERE repo_id = ?" in call for call in delete_calls))
+
+        # Check for repository comments deletion
+        self.assertTrue(any("DELETE FROM repository_comments WHERE repo_id = ?" in call for call in delete_calls))
+
+        # Check for repository deletion
+        self.assertTrue(any("DELETE FROM repositories WHERE id = ?" in call for call in delete_calls))
+
+        # Check that all operations use the correct repository ID
+        for params in delete_params:
+            if params is not None:
+                self.assertEqual(params, (self.sample_repo["id"],))
 
         # Test when no rows are affected
         self.mock_cursor.rowcount = 0
@@ -409,6 +461,53 @@ class TestDatabaseWithMocks(unittest.TestCase):
         # Test when no rows are affected
         self.mock_cursor.rowcount = 0
         result = db.update_repository_metadata("nonexistent/repo", new_tags, new_notes)
+        self.assertFalse(result)
+
+    def test_update_repository_fields_with_mock(self):
+        """Test update_repository_fields with mocks."""
+        # Mock cursor.fetchone to return a row
+        mock_row = ("test/repo", "Test Repository", "A test repository", "MIT", 10, "test, sample", 100)
+        self.mock_cursor.fetchone.return_value = mock_row
+
+        # Mock cursor.description to return column descriptions
+        mock_description = [("id",), ("name",), ("description",), ("license",), ("stars",), ("topics",), ("commits",)]
+        self.mock_cursor.description = mock_description
+
+        # Mock cursor.rowcount to return 1 (one row affected)
+        self.mock_cursor.rowcount = 1
+
+        # Fields to update
+        fields = {
+            "license": "Apache 2.0",
+            "stars": 20,
+            "topics": "test, updated, fields",
+            "commits": 150
+        }
+
+        # Call the function
+        result = db.update_repository_fields(self.sample_repo["id"], fields)
+
+        # Verify the result
+        self.assertTrue(result)
+
+        # Verify the cursor.execute was called with the correct SQL for SELECT
+        self.assertGreaterEqual(self.mock_cursor.execute.call_count, 2)
+
+        # Check the SELECT query
+        select_call = self.mock_cursor.execute.call_args_list[0][0]
+        self.assertIn("SELECT * FROM repositories WHERE id = ?", select_call[0])
+        self.assertEqual(select_call[1], (self.sample_repo["id"],))
+
+        # Check that history entries were created
+        # The exact number of execute calls depends on how many fields changed
+
+        # Check the final UPDATE query
+        update_call = self.mock_cursor.execute.call_args[0]
+        self.assertIn("UPDATE repositories SET", update_call[0])
+
+        # Test when no rows are affected
+        self.mock_cursor.rowcount = 0
+        result = db.update_repository_fields("nonexistent/repo", fields)
         self.assertFalse(result)
 
     def test_tag_repository_with_mock(self):
