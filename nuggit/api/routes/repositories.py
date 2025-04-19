@@ -53,6 +53,27 @@ def check_repository(repo_id: str):
         logging.error(f"Error checking repository {repo_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to check repository: {str(e)}")
 
+
+# Define Pydantic models for request validation
+class RepositoryInput(BaseModel):
+    """Model for repository input with validation."""
+    id: Optional[str] = Field(None, description="Repository ID in the format 'owner/name'")
+    url: Optional[str] = Field(None, description="GitHub repository URL")
+    token: Optional[str] = Field(None, description="GitHub API token for authentication")
+
+    @validator('id')
+    def validate_id_format(cls, v):
+        if v and not re.match(r'^[\w.-]+/[\w.-]+$', v):
+            raise ValueError("Repository ID must be in the format 'owner/name'")
+        return v
+
+    @validator('url')
+    def validate_url(cls, v, values):
+        if not v and not values.get('id'):
+            raise ValueError("Either 'id' or 'url' must be provided")
+        if v and not (v.startswith('http://github.com/') or v.startswith('https://github.com/')):
+            raise ValueError("URL must be a valid GitHub repository URL")
+        return v
     try:
         owner, name = repo_id.strip().split('/')
     except ValueError:
