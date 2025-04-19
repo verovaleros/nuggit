@@ -1,4 +1,5 @@
 import re
+import time
 from os import getenv
 from github import Github
 from github.GithubException import GithubException
@@ -24,7 +25,7 @@ def validate_repo_url(repo_url):
     match = re.match(r'https?://github\.com/([^/]+)/([^/]+)', repo_url)
     if not match:
         return False
-    return match.groups() 
+    return match.groups()
 
 
 def get_repo_latest_release(repo):
@@ -135,23 +136,116 @@ def get_repo_info(repo_owner, repo_name, token=getenv("GITHUB_TOKEN")):
         return None
 
 
-def get_recent_commits(repo, limit=5):
+def get_recent_commits(repo, limit=5, branch=None, max_retries=3):
     """
-    Get recent commits for a given repository.
+    Get recent commits for a given repository with improved error handling and options.
+
     Args:
         repo (Repository): The GitHub repository object.
         limit (int, optional): The number of commits to retrieve. Defaults to 5.
+        branch (str, optional): The branch to get commits from. Defaults to None (uses default branch).
+        max_retries (int, optional): Maximum number of retries for API calls. Defaults to 3.
+
     Returns:
-        list: A list of dictionaries containing commit information.
+        list: A list of dictionaries containing commit information with the following keys:
+            - sha: The short SHA of the commit
+            - author: The name of the author
+            - date: The date of the commit in ISO format
+            - message: The first line of the commit message
+
+    Raises:
+        ValueError: If repo is None or limit is not a positive integer
     """
-    try:
-        commits = repo.get_commits()
-        return [{
-            "sha": commit.sha[:7],
-            "author": commit.commit.author.name if commit.commit.author else "Unknown",
-            "date": commit.commit.author.date.isoformat() if commit.commit.author else "",
-            "message": commit.commit.message.splitlines()[0]
-        } for commit in commits[:limit]]
-    except GithubException:
+    # Parameter validation
+    if repo is None:
+        logging.error("Repository object cannot be None")
         return []
+
+    if not isinstance(limit, int) or limit <= 0:
+        logging.warning(f"Invalid limit value: {limit}. Using default of 5.")
+        limit = 5
+
+    # Initialize result list
+    result = []
+
+    # Retry logic for API rate limits or network issues
+    for attempt in range(max_retries):
+        try:
+            # Get commits with optional branch parameter
+            kwargs = {}
+            if branch:
+                kwargs['sha'] = branch
+
+            commits_paginated = repo.get_commits(**kwargs)
+
+            # Handle pagination properly for large repositories
+            count = 0
+            for commit in commits_paginated:
+                if count >= limit:
+                    break
+
+                # Safely extract commit information with fallbacks for all fields
+                try:
+                    # Get short SHA (safely handle if sha is None)
+                    short_sha = commit.sha[:7] if commit and commit.sha else "Unknown"
+
+                    # Get author name with fallbacks
+                    author_name = "Unknown"
+                    if commit and commit.commit and commit.commit.author:
+                        author_name = commit.commit.author.name or "Unknown"
+
+                    # Get date with fallbacks
+                    commit_date = ""
+                    if commit and commit.commit and commit.commit.author:
+                        if commit.commit.author.date:
+                            try:
+                                commit_date = commit.commit.author.date.isoformat()
+                            except (AttributeError, TypeError):
+                                commit_date = str(commit.commit.author.date)
+
+                    # Get message with fallbacks
+                    commit_message = ""
+                    if commit and commit.commit and commit.commit.message:
+                        # Get first line of commit message, or truncate if too long
+                        message_lines = commit.commit.message.splitlines()
+                        commit_message = message_lines[0] if message_lines else ""
+                        # Truncate if too long
+                        if len(commit_message) > 100:
+                            commit_message = commit_message[:97] + "..."
+
+                    result.append({
+                        "sha": short_sha,
+                        "author": author_name,
+                        "date": commit_date,
+                        "message": commit_message
+                    })
+
+                    count += 1
+                except Exception as e:
+                    logging.warning(f"Error processing commit: {e}")
+                    # Continue to next commit if there's an error with this one
+                    continue
+
+            # If we got here without exceptions, break the retry loop
+            break
+
+        except GithubException as e:
+            if e.status == 403 and attempt < max_retries - 1:
+                # This might be a rate limit issue, wait and retry
+                logging.warning(f"GitHub API rate limit hit, retrying ({attempt+1}/{max_retries}): {e}")
+                time.sleep(2 ** attempt)  # Exponential backoff
+            elif e.status == 404:
+                # Repository or branch not found
+                logging.error(f"Repository or branch not found: {e}")
+                return []
+            else:
+                # Log other GitHub exceptions
+                logging.error(f"GitHub API error: {e}")
+                return []
+        except Exception as e:
+            # Catch any other exceptions
+            logging.error(f"Unexpected error fetching commits: {e}")
+            return []
+
+    return result
 
