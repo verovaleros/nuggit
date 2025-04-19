@@ -1,9 +1,14 @@
-# nuggit/api/routes/repositories.py
 import os
+import re
+import time
+import logging
 import sqlite3
-from fastapi import APIRouter, HTTPException, Body
-from nuggit.util.db import list_all_repositories
-from nuggit.util.github import get_repo_info
+from typing import Optional, Union
+from pydantic import BaseModel, Field, validator
+from fastapi import APIRouter, HTTPException, Body, Query, Depends
+from nuggit.util.db import list_all_repositories, insert_or_update_repo, get_repository, delete_repository as db_delete_repository
+from nuggit.util.github import get_repo_info, validate_repo_url
+from github.GithubException import GithubException
 
 
 router = APIRouter()
@@ -155,10 +160,77 @@ def add_repository(repo_input: RepositoryInput = Body(...), max_retries: int = Q
     error_message = str(last_exception) if last_exception else "Unknown error"
     raise HTTPException(status_code=500, detail=f"Failed to process repository: {error_message}")
 
+
+@router.put("/{repo_id:path}", summary="Update repository information from GitHub")
+def update_repository(repo_id: str, token: Optional[str] = None, max_retries: int = Query(3, description="Maximum number of retries for GitHub API calls")):
+    """
+    Update repository information from GitHub.
+
+    Args:
+        repo_id (str): The ID of the repository to update.
+        token (str, optional): GitHub API token for authentication. Defaults to None.
+        max_retries (int, optional): Maximum number of retries for GitHub API calls. Defaults to 3.
+
+    Returns:
+        dict: A message indicating the result of the operation and the updated repository details.
+
+    Raises:
+        HTTPException: If the repository is not found in the database, not found on GitHub,
+                      or there is an error updating the repository.
+    """
+    # Check if repository exists in the database
+    existing_repo = get_repository(repo_id)
+    if not existing_repo:
+        raise HTTPException(status_code=404, detail=f"Repository {repo_id} not found in the database")
+
     try:
         owner, name = repo_id.strip().split('/')
     except ValueError:
         raise HTTPException(status_code=400, detail="Repository ID must be in the format 'owner/name'")
+
+    # Retry logic for GitHub API rate limits
+    last_exception = None
+    for attempt in range(max_retries):
+        try:
+            # Get updated repository information from GitHub
+            repo_info = get_repo_info(owner, name, token=token)
+            if not repo_info:
+                raise HTTPException(status_code=404, detail=f"Repository {repo_id} not found on GitHub")
+
+            # Save to DB using centralized logic
+            insert_or_update_repo(repo_info)
+
+            # Return success response with repository details
+            return {
+                "message": f"Repository '{repo_info['id']}' updated successfully.",
+                "repository": repo_info
+            }
+        except GithubException as e:
+            last_exception = e
+            if e.status == 403 and attempt < max_retries - 1:
+                # This might be a rate limit issue, wait and retry
+                logging.warning(f"GitHub API rate limit hit, retrying ({attempt+1}/{max_retries}): {e}")
+                time.sleep(2 ** attempt)  # Exponential backoff
+            elif e.status == 404:
+                # Repository not found
+                raise HTTPException(status_code=404, detail=f"Repository {repo_id} not found on GitHub")
+            else:
+                # Other GitHub exceptions
+                break
+        except Exception as e:
+            last_exception = e
+            logging.error(f"Error updating repository {repo_id}: {e}")
+            break
+
+    # If we get here, all retries failed or another exception occurred
+    error_message = str(last_exception) if last_exception else "Unknown error"
+    raise HTTPException(status_code=500, detail=f"Failed to update repository: {error_message}")
+
+
+class BatchRepositoryInput(BaseModel):
+    """Model for batch repository import."""
+    repositories: list[str] = Field(..., description="List of repository IDs in the format 'owner/name'")
+    token: Optional[str] = Field(None, description="GitHub API token for authentication")
 
 
 @router.post("/batch", summary="Import multiple repositories at once")
