@@ -1126,6 +1126,51 @@
                   <p>No changes</p>
                 {/if}
               </div>
+
+              <!-- New repository fields -->
+              <div class="comparison-field">
+                <h4>License</h4>
+                {#if comparisonResult.differences.license && comparisonResult.differences.license.changed}
+                  <div class="diff-display">
+                    {@html formatDiff(comparisonResult.differences.license.diff)}
+                  </div>
+                {:else}
+                  <p>No changes</p>
+                {/if}
+              </div>
+
+              <div class="comparison-field">
+                <h4>Stars</h4>
+                {#if comparisonResult.differences.stars && comparisonResult.differences.stars.changed}
+                  <div class="diff-display">
+                    {@html formatDiff(comparisonResult.differences.stars.diff)}
+                  </div>
+                {:else}
+                  <p>No changes</p>
+                {/if}
+              </div>
+
+              <div class="comparison-field">
+                <h4>Topics</h4>
+                {#if comparisonResult.differences.topics && comparisonResult.differences.topics.changed}
+                  <div class="diff-display">
+                    {@html formatDiff(comparisonResult.differences.topics.diff)}
+                  </div>
+                {:else}
+                  <p>No changes</p>
+                {/if}
+              </div>
+
+              <div class="comparison-field">
+                <h4>Total Commits</h4>
+                {#if comparisonResult.differences.commits && comparisonResult.differences.commits.changed}
+                  <div class="diff-display">
+                    {@html formatDiff(comparisonResult.differences.commits.diff)}
+                  </div>
+                {:else}
+                  <p>No changes</p>
+                {/if}
+              </div>
             </div>
           {/if}
         </div>

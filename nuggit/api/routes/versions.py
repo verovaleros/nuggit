@@ -8,7 +8,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import difflib
 
-from nuggit.util.db import get_repository, add_version, get_versions
+from nuggit.util.db import get_repository, add_version, get_versions, get_repository_history
 
 router = APIRouter(tags=["versions"])
 
@@ -315,12 +315,21 @@ def compare_versions_query(
         if not version2:
             raise HTTPException(status_code=404, detail=f"Version with ID {version2_id} not found")
 
+        # Get repository data for both versions
+        repo_data1 = get_repository_at_version(repo_id, version1["created_at"])
+        repo_data2 = get_repository_at_version(repo_id, version2["created_at"])
+
         # Compare the versions
         differences = {
             "version_number": compare_text(version1["version_number"], version2["version_number"]),
             "release_date": compare_text(version1["release_date"], version2["release_date"]),
             "description": compare_text(version1["description"], version2["description"]),
-            "created_at": compare_text(version1["created_at"], version2["created_at"])
+            "created_at": compare_text(version1["created_at"], version2["created_at"]),
+            # Add repository data comparisons
+            "license": compare_text(repo_data1.get("license"), repo_data2.get("license")),
+            "stars": compare_text(str(repo_data1.get("stars")), str(repo_data2.get("stars"))),
+            "topics": compare_text(repo_data1.get("topics"), repo_data2.get("topics")),
+            "commits": compare_text(str(repo_data1.get("commits")), str(repo_data2.get("commits")))
         }
 
         return {
@@ -332,6 +341,48 @@ def compare_versions_query(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to compare versions: {str(e)}")
+
+
+def get_repository_at_version(repo_id: str, version_timestamp: str) -> Dict[str, Any]:
+    """
+    Get repository data as it was at the time of a specific version.
+
+    Args:
+        repo_id (str): The ID of the repository.
+        version_timestamp (str): The timestamp of the version.
+
+    Returns:
+        Dict[str, Any]: Repository data at the time of the version.
+    """
+    import logging
+
+    # Get current repository data
+    current_repo = get_repository(repo_id)
+    if not current_repo:
+        return {}
+
+    # Make a copy of the current repository data
+    repo_at_version = dict(current_repo)
+
+    # Get repository history
+    history = get_repository_history(repo_id)
+
+    # Sort history by changed_at in descending order (newest first)
+    history = sorted(history, key=lambda x: x["changed_at"], reverse=True)
+
+    # Apply changes in reverse chronological order until we reach the version timestamp
+    for change in history:
+        # Skip changes that happened before or at the version timestamp
+        if change["changed_at"] <= version_timestamp:
+            continue
+
+        # Revert the change (set the field back to its old value)
+        field = change["field"]
+        if field in repo_at_version and field in ["license", "stars", "topics", "commits"]:
+            logging.info(f"Reverting {field} from '{repo_at_version[field]}' to '{change['old_value']}' for version at {version_timestamp}")
+            repo_at_version[field] = change["old_value"]
+
+    return repo_at_version
 
 
 def compare_text(text1, text2):

@@ -283,6 +283,58 @@ def update_repository_metadata(repo_id: str, tags: str, notes: str) -> bool:
         return success
 
 
+def update_repository_fields(repo_id: str, fields: Dict[str, Any]) -> bool:
+    """
+    Update specific fields of a repository and record the changes in history.
+
+    Args:
+        repo_id (str): The ID of the repository.
+        fields (Dict[str, Any]): A dictionary of fields to update.
+
+    Returns:
+        bool: True if the update was successful.
+    """
+    with get_connection() as conn:
+        cursor = conn.cursor()
+
+        # Get current repository data
+        cursor.execute("SELECT * FROM repositories WHERE id = ?", (repo_id,))
+        existing = cursor.fetchone()
+
+        if not existing:
+            return False
+
+        columns = [desc[0] for desc in cursor.description]
+        existing_data = dict(zip(columns, existing))
+
+        # Current timestamp
+        timestamp = datetime.utcnow().isoformat()
+
+        # Record changes in history
+        for field, value in fields.items():
+            if field in existing_data and str(value) != str(existing_data[field]):
+                cursor.execute("""
+                    INSERT INTO repository_history (repo_id, field, old_value, new_value, changed_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    repo_id,
+                    field,
+                    str(existing_data[field]),
+                    str(value),
+                    timestamp
+                ))
+
+        # Build the update query
+        set_clauses = [f"{field} = ?" for field in fields.keys()]
+        query = f"UPDATE repositories SET {', '.join(set_clauses)}, last_synced = ? WHERE id = ?"
+
+        # Execute the update
+        params = list(fields.values()) + [timestamp, repo_id]
+        cursor.execute(query, params)
+
+        return cursor.rowcount > 0
+
+
 def delete_repository(repo_id: str) -> bool:
     """
     Delete a repository and its history from the database.

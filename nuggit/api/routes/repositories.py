@@ -7,7 +7,7 @@ from os import getenv
 from typing import Optional, Union
 from pydantic import BaseModel, Field, validator
 from fastapi import APIRouter, HTTPException, Body, Query, Depends
-from nuggit.util.db import list_all_repositories, insert_or_update_repo, get_repository, delete_repository as db_delete_repository
+from nuggit.util.db import list_all_repositories, insert_or_update_repo, get_repository, delete_repository as db_delete_repository, update_repository_fields
 from nuggit.util.github import get_repo_info, validate_repo_url
 from github.GithubException import GithubException
 
@@ -241,6 +241,14 @@ class BatchRepositoryInput(BaseModel):
     token: Optional[str] = Field(None, description="GitHub API token for authentication")
 
 
+class RepositoryFieldsUpdate(BaseModel):
+    """Model for updating repository fields."""
+    license: Optional[str] = Field(None, description="Repository license")
+    stars: Optional[int] = Field(None, description="Number of stars")
+    topics: Optional[str] = Field(None, description="Repository topics")
+    commits: Optional[int] = Field(None, description="Total number of commits")
+
+
 @router.post("/batch", summary="Import multiple repositories at once")
 def batch_import_repositories(batch_input: BatchRepositoryInput = Body(...)):
     """
@@ -305,6 +313,53 @@ def batch_import_repositories(batch_input: BatchRepositoryInput = Body(...)):
         "message": f"Batch import completed. {len(results['successful'])} succeeded, {len(results['failed'])} failed.",
         "results": results
     }
+
+
+@router.patch("/{repo_id:path}/fields", summary="Update specific repository fields")
+def update_repository_field_values(repo_id: str, fields: RepositoryFieldsUpdate = Body(...)):
+    """
+    Update specific fields of a repository.
+
+    Args:
+        repo_id (str): The ID of the repository.
+        fields (RepositoryFieldsUpdate): The fields to update.
+
+    Returns:
+        dict: A message indicating the result of the operation and the updated repository details.
+
+    Raises:
+        HTTPException: If the repository is not found or there is an error updating the fields.
+    """
+    # Check if repository exists
+    existing_repo = get_repository(repo_id)
+    if not existing_repo:
+        raise HTTPException(status_code=404, detail=f"Repository {repo_id} not found in the database")
+
+    try:
+        # Convert the fields model to a dictionary, excluding None values
+        fields_dict = {k: v for k, v in fields.dict().items() if v is not None}
+
+        if not fields_dict:
+            raise HTTPException(status_code=400, detail="No fields provided for update")
+
+        # Update the fields
+        success = update_repository_fields(repo_id, fields_dict)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update repository fields")
+
+        # Get the updated repository
+        updated_repo = get_repository(repo_id)
+
+        return {
+            "message": f"Repository '{repo_id}' fields updated successfully.",
+            "repository": updated_repo
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error updating repository fields for {repo_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update repository fields: {str(e)}")
 
 
 @router.delete("/{repo_id:path}", summary="Delete a repository from the database")
