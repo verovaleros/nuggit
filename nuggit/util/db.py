@@ -255,13 +255,24 @@ def get_repository(repo_id: str) -> Optional[Dict[str, Any]]:
         logging.warning(f"Repository not found with ID: {repo_id}")
         return None
 
+
 def list_all_repositories() -> list[Dict[str, Any]]:
+    """
+    List all repositories in the database.
+
+    Returns:
+        List[Dict[str, Any]]: A list of dictionaries containing repository data.
+
+    Raises:
+        sqlite3.Error: If there is a database error.
+    """
+    query = "SELECT * FROM repositories"
+
     with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM repositories")
-        rows = cursor.fetchall()
-        columns = [desc[0] for desc in cursor.description]
-        return [dict(zip(columns, row)) for row in rows]
+        # Have rows behave like dicts (column → value)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(query)
+        return [dict(row) for row in cursor]
 
 
 def get_repository_history(repo_id: str) -> list[Dict[str, Any]]:
