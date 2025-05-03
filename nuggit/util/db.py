@@ -80,51 +80,30 @@ def initialize_database():
         )
         """)
 
-def add_origin_version(repo_id: str):
-    """
-    Add an 'Origin' version to a newly added repository.
 
+def add_origin_version(repo_id: str) -> int:
+    """
+    Add a single version to a newly added repository,
+    using today's date (YYYY.MM.DD) as the version_number
+    and recording when it was indexed.
+    
     Args:
         repo_id (str): The ID of the repository.
 
     Returns:
         int: The ID of the newly added version.
     """
-    import logging
-    import time
+    today = datetime.utcnow().date()
+    version_name = today.strftime("%Y.%m.%d")
+    release_date = today.isoformat()
+    description = f"Indexed on {release_date}"
 
-    # Get today's date in ISO format (YYYY-MM-DD)
-    today = datetime.now().date().isoformat()
-
-    # Add the Origin version with retry mechanism
-    max_retries = 3
-    retry_delay = 1  # seconds
-    last_error = None
-
-    for attempt in range(max_retries):
-        try:
-            version_id = add_version(
-                repo_id=repo_id,
-                version_number="Origin",
-                release_date=today,
-                description="Repository indexed in Nuggit for the first time"
-            )
-            logging.info(f"Successfully added 'Origin' version for repository {repo_id}")
-            return version_id
-        except Exception as e:
-            last_error = e
-            if 'database is locked' in str(e) and attempt < max_retries - 1:
-                # Database is locked, wait and retry
-                logging.warning(f"Database locked when adding 'Origin' version for {repo_id}, retrying in {retry_delay} seconds...")
-                time.sleep(retry_delay)
-                retry_delay *= 2  # Exponential backoff
-            else:
-                # Other error or final attempt failed
-                break
-
-    # If we get here, all retries failed
-    logging.error(f"Failed to add 'Origin' version after {max_retries} attempts: {last_error}")
-    raise last_error
+    return add_version(
+        repo_id=repo_id,
+        version_number=version_name,
+        release_date=release_date,
+        description=description
+    )
 
 
 def insert_or_update_repo(repo_data: Dict[str, Any]):
