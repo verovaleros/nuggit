@@ -42,6 +42,7 @@ def initialize_database():
         )
         """)
 
+        # Create repo history table
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS repository_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -471,15 +472,22 @@ def get_versions(repo_id: str) -> List[Dict[str, Any]]:
     Raises:
         sqlite3.Error: If there is a database error.
     """
+    query = """
+        SELECT
+            id,
+            version_number,
+            release_date,
+            description,
+            created_at
+        FROM repository_versions
+        WHERE repo_id = ?
+        ORDER BY created_at DESC
+    """
+
     with get_connection() as conn:
-        cursor = conn.cursor()
+        # Tell sqlite3 to give us rows that behave like dicts
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(query, (repo_id,))
 
-        # Get all versions for the repository, ordered by creation time (newest first)
-        cursor.execute(
-            "SELECT id, version_number, release_date, description, created_at FROM repository_versions WHERE repo_id = ? ORDER BY created_at DESC",
-            (repo_id,)
-        )
-
-        # Convert the results to a list of dictionaries
-        columns = [column[0] for column in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        # Now each row is a sqlite3.Row, which can be cast directly to dict
+        return [dict(row) for row in cursor]
