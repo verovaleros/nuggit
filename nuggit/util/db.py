@@ -295,45 +295,56 @@ def update_repository_fields(repo_id: str, fields: Dict[str, Any]) -> bool:
     Returns:
         bool: True if the update was successful.
     """
+    # Always record history & last_synced in UTC ISO format
+    timestamp = datetime.utcnow().isoformat()
+
+    # Select only the columns we care about
+    cols = ", ".join(fields.keys())
+    query_select = f"SELECT {cols} FROM repositories WHERE id = ?"
+
+    # Prepare history insert and repository update templates
+    query_history = """
+        INSERT INTO repository_history
+            (repo_id, field, old_value, new_value, changed_at)
+        VALUES (?, ?, ?, ?, ?)
+    """
+    set_clauses = [f"{field} = ?" for field in fields.keys()] + ["last_synced = ?"]
+    query_update = f"""
+        UPDATE repositories
+           SET {', '.join(set_clauses)}
+         WHERE id = ?
+    """
+
     with get_connection() as conn:
-        cursor = conn.cursor()
-
-        # Get current repository data
-        cursor.execute("SELECT * FROM repositories WHERE id = ?", (repo_id,))
-        existing = cursor.fetchone()
-
-        if not existing:
+        # Fetch existing values for only the fields being updated
+        conn.row_factory = sqlite3.Row
+        cur = conn.execute(query_select, (repo_id,))
+        row = cur.fetchone()
+        if not row:
             return False
 
-        columns = [desc[0] for desc in cursor.description]
-        existing_data = dict(zip(columns, existing))
+        existing = dict(row)
 
-        # Current timestamp
-        timestamp = datetime.utcnow().isoformat()
+        # Batch up any history entries for fields that actually changed
+        history_params = [
+            (
+                repo_id,
+                field,
+                str(existing.get(field)),
+                str(new_val),
+                timestamp
+            )
+            for field, new_val in fields.items()
+            if str(existing.get(field)) != str(new_val)
+        ]
 
-        # Record changes in history
-        for field, value in fields.items():
-            if field in existing_data and str(value) != str(existing_data[field]):
-                cursor.execute("""
-                    INSERT INTO repository_history (repo_id, field, old_value, new_value, changed_at)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (
-                    repo_id,
-                    field,
-                    str(existing_data[field]),
-                    str(value),
-                    timestamp
-                ))
+        if history_params:
+            conn.executemany(query_history, history_params)
 
-        # Build the update query
-        set_clauses = [f"{field} = ?" for field in fields.keys()]
-        query = f"UPDATE repositories SET {', '.join(set_clauses)}, last_synced = ? WHERE id = ?"
-
-        # Execute the update
+        # Perform the repository update (always updates last_synced)
         params = list(fields.values()) + [timestamp, repo_id]
-        cursor.execute(query, params)
-
-        return cursor.rowcount > 0
+        result = conn.execute(query_update, params)
+        return result.rowcount > 0
 
 
 def delete_repository(repo_id: str) -> bool:
