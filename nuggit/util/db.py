@@ -219,23 +219,54 @@ def insert_or_update_repo(repo_data: Dict[str, Any]):
             logging.info(f"Scheduled 'Origin' version creation for repository {repo_data['id']} in background")
 
 
-def tag_repository(repo_id: str, tag: str):
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-        UPDATE repositories
-        SET tags = COALESCE(tags || ',', '') || ?
-        WHERE id = ?
-        """, (tag, repo_id))
+def tag_repository(repo_id: str, tag: str) -> bool:
+    """
+    Append a tag to a repository’s existing tags.
 
-def add_note(repo_id: str, note: str):
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
+    Args:
+        repo_id (str): The ID of the repository.
+        tag (str): The tag to add.
+
+    Returns:
+        bool: True if the update affected a row, False otherwise.
+
+    Raises:
+        sqlite3.Error: If there is a database error.
+    """
+    query = """
         UPDATE repositories
-        SET notes = COALESCE(notes || '\n', '') || ?
-        WHERE id = ?
-        """, (note, repo_id))
+           SET tags = COALESCE(tags || ',', '') || ?
+         WHERE id = ?
+    """
+
+    with get_connection() as conn:
+        result = conn.execute(query, (tag, repo_id))
+        return result.rowcount > 0
+
+
+def add_note(repo_id: str, note: str) -> bool:
+    """
+    Append a note to a repository’s existing notes.
+
+    Args:
+        repo_id (str): The ID of the repository.
+        note (str): The note text to append.
+
+    Returns:
+        bool: True if the update affected a row, False otherwise.
+
+    Raises:
+        sqlite3.Error: If there is a database error.
+    """
+    query = """
+        UPDATE repositories
+           SET notes = COALESCE(notes || '\n', '') || ?
+         WHERE id = ?
+    """
+
+    with get_connection() as conn:
+        result = conn.execute(query, (note, repo_id))
+        return result.rowcount > 0
 
 
 def get_repository(repo_id: str) -> Optional[Dict[str, Any]]:
