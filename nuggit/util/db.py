@@ -409,18 +409,21 @@ def get_comments(repo_id: str) -> List[Dict[str, Any]]:
     Raises:
         sqlite3.Error: If there is a database error.
     """
+    query = """
+        SELECT
+            id,
+            comment,
+            author,
+            created_at
+        FROM repository_comments
+        WHERE repo_id = ?
+        ORDER BY created_at DESC
+    """
     with get_connection() as conn:
-        cursor = conn.cursor()
-
-        # Get all comments for the repository, ordered by creation time (newest first)
-        cursor.execute(
-            "SELECT id, comment, author, created_at FROM repository_comments WHERE repo_id = ? ORDER BY created_at DESC",
-            (repo_id,)
-        )
-
-        # Convert the results to a list of dictionaries
-        columns = [column[0] for column in cursor.description]
-        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+        # Return rows as mapping of column→value
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(query, (repo_id,))
+        return [dict(row) for row in cursor]
 
 
 def add_version(repo_id: str, version_number: str, release_date: Optional[str] = None, description: Optional[str] = None) -> int:
