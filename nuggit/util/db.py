@@ -106,96 +106,75 @@ def add_origin_version(repo_id: str) -> int:
     )
 
 
-def insert_or_update_repo(repo_data: Dict[str, Any]):
-    repo_data.setdefault('last_synced', datetime.utcnow().isoformat())
+def insert_or_update_repo(repo_data: Dict[str, Any]) -> None:
+    """
+    Insert a new repository or update an existing one, recording any field changes in history.
+    If it’s a new repo, immediately add an initial version named by today’s date.
+
+    Args:
+        repo_data (Dict[str, Any]): Repository fields; must include 'id'.
+    """
+    # Single UTC timestamp for history & upsert
+    timestamp = datetime.utcnow().isoformat()
+    repo_data.setdefault('last_synced', timestamp)
+
+    # Columns to upsert
+    upsert_cols = [
+        "id", "name", "description", "url", "topics", "license",
+        "created_at", "updated_at", "stars", "forks", "issues",
+        "contributors", "commits", "last_commit", "tags", "notes", "last_synced"
+    ]
+
+    # SQL templates
+    query_select = f"""
+        SELECT {', '.join(upsert_cols)}
+          FROM repositories
+         WHERE id = ?
+    """
+    query_history = """
+        INSERT INTO repository_history
+            (repo_id, field, old_value, new_value, changed_at)
+        VALUES (?, ?, ?, ?, ?)
+    """
+    query_upsert = f"""
+        INSERT INTO repositories ({', '.join(upsert_cols)})
+        VALUES ({', '.join(f":{c}" for c in upsert_cols)})
+          ON CONFLICT(id) DO UPDATE SET
+            {', '.join(f"{c}=excluded.{c}" for c in upsert_cols if c != "id")}
+    """
 
     with get_connection() as conn:
-        cursor = conn.cursor()
+        # Map rows to dicts
+        conn.row_factory = sqlite3.Row
 
-        # Fetch existing repo data for comparison
-        cursor.execute("SELECT * FROM repositories WHERE id = ?", (repo_data['id'],))
-        existing = cursor.fetchone()
-        columns = [desc[0] for desc in cursor.description]
+        # Check for existing repo
+        cur = conn.execute(query_select, (repo_data['id'],))
+        row = cur.fetchone()
+        is_new = row is None
 
-        # Flag to track if this is a new repository
-        is_new_repo = existing is None
+        # Record history for changed fields
+        if row:
+            existing = dict(row)
+            history_params: List[tuple] = [
+                (
+                    repo_data['id'],
+                    field,
+                    str(existing[field]),
+                    str(repo_data[field]),
+                    timestamp
+                )
+                for field in repo_data
+                if field in existing and str(repo_data[field]) != str(existing[field])
+            ]
+            if history_params:
+                conn.executemany(query_history, history_params)
 
-        if existing:
-            existing_data = dict(zip(columns, existing))
-            for field in repo_data:
-                if field in existing_data and str(repo_data[field]) != str(existing_data[field]):
-                    cursor.execute("""
-                        INSERT INTO repository_history (repo_id, field, old_value, new_value, changed_at)
-                        VALUES (?, ?, ?, ?, ?)
-                    """, (
-                        repo_data['id'],
-                        field,
-                        str(existing_data[field]),
-                        str(repo_data[field]),
-                        repo_data['last_synced']
-                    ))
+        # Upsert repository row
+        conn.execute(query_upsert, repo_data)
 
-
-        cursor.execute("""
-        INSERT INTO repositories (
-            id, name, description, url, topics, license, created_at, updated_at,
-            stars, forks, issues, contributors, commits, last_commit, tags, notes, last_synced
-        ) VALUES (
-            :id, :name, :description, :url, :topics, :license, :created_at, :updated_at,
-            :stars, :forks, :issues, :contributors, :commits, :last_commit, :tags, :notes, :last_synced
-        )
-        ON CONFLICT(id) DO UPDATE SET
-            name = excluded.name,
-            description = excluded.description,
-            url = excluded.url,
-            topics = excluded.topics,
-            license = excluded.license,
-            created_at = excluded.created_at,
-            updated_at = excluded.updated_at,
-            stars = excluded.stars,
-            forks = excluded.forks,
-            issues = excluded.issues,
-            contributors = excluded.contributors,
-            commits = excluded.commits,
-            last_commit = excluded.last_commit,
-            tags = excluded.tags,
-            notes = excluded.notes,
-            last_synced = excluded.last_synced
-        """, repo_data)
-
-        # If this is a new repository, schedule the Origin version to be added asynchronously
-        if is_new_repo:
-            import threading
-            import logging
-
-            def add_origin_version_async(repo_id):
-                import time
-                max_retries = 3
-                retry_delay = 1  # seconds
-
-                # Wait a bit to let the main transaction complete
-                time.sleep(1)
-
-                for attempt in range(max_retries):
-                    try:
-                        add_origin_version(repo_id)
-                        logging.info(f"Added 'Origin' version for new repository: {repo_id}")
-                        break  # Success, exit the retry loop
-                    except Exception as e:
-                        if 'database is locked' in str(e) and attempt < max_retries - 1:
-                            # Database is locked, wait and retry
-                            logging.warning(f"Database locked when adding 'Origin' version for {repo_id}, retrying in {retry_delay} seconds...")
-                            time.sleep(retry_delay)
-                            retry_delay *= 2  # Exponential backoff
-                        else:
-                            # Other error or final attempt failed
-                            logging.error(f"Failed to add 'Origin' version for repository {repo_id}: {e}")
-
-            # Start a background thread to add the Origin version
-            thread = threading.Thread(target=add_origin_version_async, args=(repo_data['id'],))
-            thread.daemon = True  # Make the thread a daemon so it doesn't block program exit
-            thread.start()
-            logging.info(f"Scheduled 'Origin' version creation for repository {repo_data['id']} in background")
+    # For new repositories, add initial dated version
+    if is_new:
+        add_origin_version(repo_data['id'])
 
 
 def tag_repository(repo_id: str, tag: str) -> bool:
