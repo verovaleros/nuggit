@@ -263,18 +263,36 @@ def list_all_repositories() -> list[Dict[str, Any]]:
         columns = [desc[0] for desc in cursor.description]
         return [dict(zip(columns, row)) for row in rows]
 
+
 def get_repository_history(repo_id: str) -> list[Dict[str, Any]]:
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("""
-        SELECT field, old_value, new_value, changed_at
+    """
+    Get all history entries for a repository, newest first.
+
+    Args:
+        repo_id (str): The ID of the repository.
+
+    Returns:
+        List[Dict[str, Any]]: A list of dictionaries containing history records.
+
+    Raises:
+        sqlite3.Error: If there is a database error.
+    """
+    query = """
+        SELECT
+            field,
+            old_value,
+            new_value,
+            changed_at
         FROM repository_history
         WHERE repo_id = ?
         ORDER BY changed_at DESC
-        """, (repo_id,))
-        rows = cursor.fetchall()
-        columns = [desc[0] for desc in cursor.description]
-        return [dict(zip(columns, row)) for row in rows]
+    """
+
+    with get_connection() as conn:
+        # Have rows behave like a dict of column → value
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(query, (repo_id,))
+        return [dict(row) for row in cursor]
 
 
 def update_repository_metadata(repo_id: str, tags: str, notes: str) -> bool:
