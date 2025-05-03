@@ -237,23 +237,28 @@ def add_note(repo_id: str, note: str):
         WHERE id = ?
         """, (note, repo_id))
 
+
 def get_repository(repo_id: str) -> Optional[Dict[str, Any]]:
-    # Debug logging
-    import logging
-    logging.info(f"Getting repository with ID: {repo_id}")
+    """
+    Retrieve a repository by its ID.
+
+    Args:
+        repo_id (str): The ID of the repository.
+
+    Returns:
+        Optional[Dict[str, Any]]: A dictionary of repository fields if found, else None.
+
+    Raises:
+        sqlite3.Error: If there is a database error.
+    """
+    query = "SELECT * FROM repositories WHERE id = ?"
 
     with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT * FROM repositories WHERE id = ?", (repo_id,))
+        # Have rows behave like dicts (column → value)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(query, (repo_id,))
         row = cursor.fetchone()
-        if row:
-            columns = [desc[0] for desc in cursor.description]
-            result = dict(zip(columns, row))
-            logging.info(f"Found repository: {result['name']}")
-            return result
-
-        logging.warning(f"Repository not found with ID: {repo_id}")
-        return None
+        return dict(row) if row else None
 
 
 def list_all_repositories() -> list[Dict[str, Any]]:
