@@ -380,19 +380,17 @@ def add_comment(repo_id: str, comment: str, author: str = "Anonymous") -> int:
     Raises:
         sqlite3.Error: If there is a database error.
     """
-    with get_connection() as conn:
-        cursor = conn.cursor()
-
-        # Get current timestamp in ISO format
-        created_at = datetime.utcnow().isoformat()
-
-        # Insert the comment
-        cursor.execute(
-            "INSERT INTO repository_comments (repo_id, comment, author, created_at) VALUES (?, ?, ?, ?)",
+    query = """
+        INSERT INTO repository_comments
             (repo_id, comment, author, created_at)
-        )
+        VALUES (?, ?, ?, ?)
+    """
 
-        # Get the ID of the newly inserted comment
+    # Use a UTC‐aware timestamp
+    created_at = datetime.now(timezone.utc).isoformat()
+
+    with get_connection() as conn:
+        cursor = conn.execute(query, (repo_id, comment, author, created_at))
         return cursor.lastrowid
 
 
