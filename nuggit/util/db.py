@@ -1,5 +1,3 @@
-# nuggit/util/db.py
-
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
@@ -10,14 +8,46 @@ DB_PATH = Path(__file__).resolve().parent.parent / "nuggit.db"
 
 @contextmanager
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
+    """
+    Context manager for SQLite connections with enhanced defaults:
+    - 30s timeout for busy waits
+    - PARSE_DECLTYPES and PARSE_COLNAMES for type detection
+    - sqlite3.Row row factory for dict-like row access
+    - foreign key enforcement on
+
+    Yields:
+        sqlite3.Connection: A SQLite connection with custom settings.
+
+    Raises:
+        sqlite3.Error: If connecting to the database fails.
+    """
+    conn = sqlite3.connect(
+        DB_PATH,
+        timeout=30,
+        detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
+    )
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
     try:
         yield conn
         conn.commit()
     finally:
         conn.close()
 
-def initialize_database():
+
+def initialize_database() -> None:
+    """
+    Initialize the database schema, creating tables if they do not exist.
+
+    Tables:
+        - repositories
+        - repository_history
+        - repository_comments
+        - repository_versions
+
+    Raises:
+        sqlite3.Error: If any schema creation statement fails.
+    """
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -41,8 +71,6 @@ def initialize_database():
             last_synced TEXT
         )
         """)
-
-        # Create repo history table
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS repository_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,8 +82,6 @@ def initialize_database():
             FOREIGN KEY (repo_id) REFERENCES repositories(id)
         )
         """)
-
-        # Create comments table
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS repository_comments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,8 +92,6 @@ def initialize_database():
             FOREIGN KEY (repo_id) REFERENCES repositories(id)
         )
         """)
-
-        # Create versions table
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS repository_versions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,12 +110,15 @@ def add_origin_version(repo_id: str) -> int:
     Add a single version to a newly added repository,
     using today's date (YYYY.MM.DD) as the version_number
     and recording when it was indexed.
-    
+
     Args:
         repo_id (str): The ID of the repository.
 
     Returns:
         int: The ID of the newly added version.
+
+    Raises:
+        sqlite3.Error: If the database insert fails.
     """
     today = datetime.utcnow().date()
     version_name = today.strftime("%Y.%m.%d")
@@ -108,29 +135,26 @@ def add_origin_version(repo_id: str) -> int:
 
 def insert_or_update_repo(repo_data: Dict[str, Any]) -> None:
     """
-    Insert a new repository or update an existing one, recording any field changes in history.
-    If it’s a new repo, immediately add an initial version named by today’s date.
+    Insert a new repository or update an existing one,
+    recording any field changes in history.
+    If it's a new repo, immediately add an initial version named by today's date.
 
     Args:
         repo_data (Dict[str, Any]): Repository fields; must include 'id'.
+
+    Raises:
+        sqlite3.Error: If any database operation fails.
     """
-    # Single UTC timestamp for history & upsert
     timestamp = datetime.utcnow().isoformat()
     repo_data.setdefault('last_synced', timestamp)
 
-    # Columns to upsert
     upsert_cols = [
         "id", "name", "description", "url", "topics", "license",
         "created_at", "updated_at", "stars", "forks", "issues",
         "contributors", "commits", "last_commit", "tags", "notes", "last_synced"
     ]
 
-    # SQL templates
-    query_select = f"""
-        SELECT {', '.join(upsert_cols)}
-          FROM repositories
-         WHERE id = ?
-    """
+    query_select = f"SELECT {', '.join(upsert_cols)} FROM repositories WHERE id = ?"
     query_history = """
         INSERT INTO repository_history
             (repo_id, field, old_value, new_value, changed_at)
@@ -139,28 +163,21 @@ def insert_or_update_repo(repo_data: Dict[str, Any]) -> None:
     query_upsert = f"""
         INSERT INTO repositories ({', '.join(upsert_cols)})
         VALUES ({', '.join(f":{c}" for c in upsert_cols)})
-          ON CONFLICT(id) DO UPDATE SET
-            {', '.join(f"{c}=excluded.{c}" for c in upsert_cols if c != "id")}
+        ON CONFLICT(id) DO UPDATE SET
+        {', '.join(f"{c}=excluded.{c}" for c in upsert_cols if c != "id")}
     """
 
     with get_connection() as conn:
-        # Map rows to dicts
-        conn.row_factory = sqlite3.Row
-
-        # Check for existing repo
         cur = conn.execute(query_select, (repo_data['id'],))
         row = cur.fetchone()
         is_new = row is None
 
-        # Record history for changed fields
         if row:
             existing = dict(row)
             history_params: List[tuple] = [
                 (
-                    repo_data['id'],
-                    field,
-                    str(existing[field]),
-                    str(repo_data[field]),
+                    repo_data['id'], field,
+                    str(existing[field]), str(repo_data[field]),
                     timestamp
                 )
                 for field in repo_data
@@ -169,17 +186,15 @@ def insert_or_update_repo(repo_data: Dict[str, Any]) -> None:
             if history_params:
                 conn.executemany(query_history, history_params)
 
-        # Upsert repository row
         conn.execute(query_upsert, repo_data)
 
-    # For new repositories, add initial dated version
     if is_new:
         add_origin_version(repo_data['id'])
 
 
 def tag_repository(repo_id: str, tag: str) -> bool:
     """
-    Append a tag to a repository’s existing tags.
+    Append a tag to a repository's existing tags.
 
     Args:
         repo_id (str): The ID of the repository.
@@ -189,14 +204,13 @@ def tag_repository(repo_id: str, tag: str) -> bool:
         bool: True if the update affected a row, False otherwise.
 
     Raises:
-        sqlite3.Error: If there is a database error.
+        sqlite3.Error: If the database update fails.
     """
     query = """
         UPDATE repositories
-           SET tags = COALESCE(tags || ',', '') || ?
-         WHERE id = ?
+        SET tags = COALESCE(tags || ',', '') || ?
+        WHERE id = ?
     """
-
     with get_connection() as conn:
         result = conn.execute(query, (tag, repo_id))
         return result.rowcount > 0
@@ -204,7 +218,7 @@ def tag_repository(repo_id: str, tag: str) -> bool:
 
 def add_note(repo_id: str, note: str) -> bool:
     """
-    Append a note to a repository’s existing notes.
+    Append a note to a repository's existing notes.
 
     Args:
         repo_id (str): The ID of the repository.
@@ -214,14 +228,13 @@ def add_note(repo_id: str, note: str) -> bool:
         bool: True if the update affected a row, False otherwise.
 
     Raises:
-        sqlite3.Error: If there is a database error.
+        sqlite3.Error: If the database update fails.
     """
     query = """
         UPDATE repositories
-           SET notes = COALESCE(notes || '\n', '') || ?
-         WHERE id = ?
+        SET notes = COALESCE(notes || '\n', '') || ?
+        WHERE id = ?
     """
-
     with get_connection() as conn:
         result = conn.execute(query, (note, repo_id))
         return result.rowcount > 0
@@ -235,74 +248,58 @@ def get_repository(repo_id: str) -> Optional[Dict[str, Any]]:
         repo_id (str): The ID of the repository.
 
     Returns:
-        Optional[Dict[str, Any]]: A dictionary of repository fields if found, else None.
+        Optional[Dict[str, Any]]: A dict of repository fields if found, else None.
 
     Raises:
-        sqlite3.Error: If there is a database error.
+        sqlite3.Error: If the database query fails.
     """
     query = "SELECT * FROM repositories WHERE id = ?"
-
     with get_connection() as conn:
-        # Have rows behave like dicts (column → value)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute(query, (repo_id,))
-        row = cursor.fetchone()
+        row = conn.execute(query, (repo_id,)).fetchone()
         return dict(row) if row else None
 
 
-def list_all_repositories() -> list[Dict[str, Any]]:
+def list_all_repositories() -> List[Dict[str, Any]]:
     """
-    List all repositories in the database.
+    List all repositories.
 
     Returns:
-        List[Dict[str, Any]]: A list of dictionaries containing repository data.
+        List[Dict[str, Any]]: A list of repository records.
 
     Raises:
-        sqlite3.Error: If there is a database error.
+        sqlite3.Error: If the database query fails.
     """
     query = "SELECT * FROM repositories"
-
     with get_connection() as conn:
-        # Have rows behave like dicts (column → value)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute(query)
-        return [dict(row) for row in cursor]
+        return [dict(r) for r in conn.execute(query)]
 
 
-def get_repository_history(repo_id: str) -> list[Dict[str, Any]]:
+def get_repository_history(repo_id: str) -> List[Dict[str, Any]]:
     """
     Get all history entries for a repository, newest first.
 
     Args:
-        repo_id (str): The ID of the repository.
+        repo_id (str): The repository ID.
 
     Returns:
-        List[Dict[str, Any]]: A list of dictionaries containing history records.
+        List[Dict[str, Any]]: History records.
 
     Raises:
-        sqlite3.Error: If there is a database error.
+        sqlite3.Error: If the database query fails.
     """
     query = """
-        SELECT
-            field,
-            old_value,
-            new_value,
-            changed_at
+        SELECT field, old_value, new_value, changed_at
         FROM repository_history
         WHERE repo_id = ?
         ORDER BY changed_at DESC
     """
-
     with get_connection() as conn:
-        # Have rows behave like a dict of column → value
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute(query, (repo_id,))
-        return [dict(row) for row in cursor]
+        return [dict(r) for r in conn.execute(query, (repo_id,))]
 
 
 def update_repository_metadata(repo_id: str, tags: str, notes: str) -> bool:
     """
-    Update the tags and notes of a repository.
+    Update tags and notes of a repository.
 
     Args:
         repo_id (str): The ID of the repository.
@@ -310,111 +307,78 @@ def update_repository_metadata(repo_id: str, tags: str, notes: str) -> bool:
         notes (str): Free-form notes.
 
     Returns:
-        bool: True if the update affected a row, False otherwise.
+        bool: True if updated successfully, False otherwise.
 
     Raises:
-        sqlite3.Error: If there is a database error.
+        sqlite3.Error: If the database update fails.
     """
     query = """
         UPDATE repositories
-           SET tags  = ?,
-               notes = ?
-         WHERE id    = ?
+        SET tags = ?, notes = ?
+        WHERE id = ?
     """
-
     with get_connection() as conn:
-        result = conn.execute(query, (tags, notes, repo_id))
-        return result.rowcount > 0
+        return conn.execute(query, (tags, notes, repo_id)).rowcount > 0
 
 
 def update_repository_fields(repo_id: str, fields: Dict[str, Any]) -> bool:
     """
-    Update specific fields of a repository and record the changes in history.
+    Update specific fields of a repository and record changes in history.
 
     Args:
-        repo_id (str): The ID of the repository.
-        fields (Dict[str, Any]): A dictionary of fields to update.
+        repo_id (str): Repository ID.
+        fields (Dict[str, Any]): Fields to update.
 
     Returns:
-        bool: True if the update was successful.
-    """
-    # Always record history & last_synced in UTC ISO format
-    timestamp = datetime.utcnow().isoformat()
+        bool: True if update succeeded, False otherwise.
 
-    # Select only the columns we care about
+    Raises:
+        sqlite3.Error: If any database operation fails.
+    """
+    timestamp = datetime.utcnow().isoformat()
     cols = ", ".join(fields.keys())
     query_select = f"SELECT {cols} FROM repositories WHERE id = ?"
-
-    # Prepare history insert and repository update templates
     query_history = """
         INSERT INTO repository_history
             (repo_id, field, old_value, new_value, changed_at)
         VALUES (?, ?, ?, ?, ?)
     """
-    set_clauses = [f"{field} = ?" for field in fields.keys()] + ["last_synced = ?"]
-    query_update = f"""
-        UPDATE repositories
-           SET {', '.join(set_clauses)}
-         WHERE id = ?
-    """
+    set_clauses = [f"{f} = ?" for f in fields] + ["last_synced = ?"]
+    query_update = f"UPDATE repositories SET {', '.join(set_clauses)} WHERE id = ?"
 
     with get_connection() as conn:
-        # Fetch existing values for only the fields being updated
-        conn.row_factory = sqlite3.Row
-        cur = conn.execute(query_select, (repo_id,))
-        row = cur.fetchone()
+        row = conn.execute(query_select, (repo_id,)).fetchone()
         if not row:
             return False
-
         existing = dict(row)
-
-        # Batch up any history entries for fields that actually changed
         history_params = [
-            (
-                repo_id,
-                field,
-                str(existing.get(field)),
-                str(new_val),
-                timestamp
-            )
-            for field, new_val in fields.items()
-            if str(existing.get(field)) != str(new_val)
+            (repo_id, f, str(existing.get(f)), str(v), timestamp)
+            for f, v in fields.items()
+            if str(existing.get(f)) != str(v)
         ]
-
         if history_params:
             conn.executemany(query_history, history_params)
-
-        # Perform the repository update (always updates last_synced)
         params = list(fields.values()) + [timestamp, repo_id]
-        result = conn.execute(query_update, params)
-        return result.rowcount > 0
+        return conn.execute(query_update, params).rowcount > 0
 
 
 def delete_repository(repo_id: str) -> bool:
     """
-    Delete a repository and its history from the database.
+    Delete a repository and its related data.
 
     Args:
-        repo_id (str): The ID of the repository to delete.
+        repo_id (str): The ID of the repository.
 
     Returns:
-        bool: True if the repository was deleted, False if it was not found.
+        bool: True if deleted successfully, False otherwise.
 
     Raises:
-        sqlite3.Error: If there is a database error.
+        sqlite3.Error: If any database delete operation fails.
     """
-    delete_history_q = "DELETE FROM repository_history WHERE repo_id = ?"
-    delete_comments_q = "DELETE FROM repository_comments WHERE repo_id = ?"
-    delete_repo_q = "DELETE FROM repositories WHERE id = ?"
-
     with get_connection() as conn:
-        # Clean up dependent tables
-        conn.execute(delete_history_q, (repo_id,))
-        conn.execute(delete_comments_q, (repo_id,))
-
-        # Delete the repository itself and check how many rows were removed
-        cursor = conn.execute(delete_repo_q, (repo_id,))
-        return cursor.rowcount > 0
+        conn.execute("DELETE FROM repository_history WHERE repo_id = ?", (repo_id,))
+        conn.execute("DELETE FROM repository_comments WHERE repo_id = ?", (repo_id,))
+        return conn.execute("DELETE FROM repositories WHERE id = ?", (repo_id,)).rowcount > 0
 
 
 def add_comment(repo_id: str, comment: str, author: str = "Anonymous") -> int:
@@ -424,55 +388,36 @@ def add_comment(repo_id: str, comment: str, author: str = "Anonymous") -> int:
     Args:
         repo_id (str): The ID of the repository.
         comment (str): The comment text.
-        author (str, optional): The author of the comment. Defaults to "Anonymous".
+        author (str): The author of the comment.
 
     Returns:
-        int: The ID of the newly added comment.
+        int: ID of new comment.
 
     Raises:
-        sqlite3.Error: If there is a database error.
+        sqlite3.Error: If the database insert fails.
     """
-    query = """
-        INSERT INTO repository_comments
-            (repo_id, comment, author, created_at)
-        VALUES (?, ?, ?, ?)
-    """
-    # Get current timestamp in ISO format
     created_at = datetime.utcnow().isoformat()
-
+    query = "INSERT INTO repository_comments (repo_id, comment, author, created_at) VALUES (?, ?, ?, ?)"
     with get_connection() as conn:
-        cursor = conn.execute(query, (repo_id, comment, author, created_at))
-        return cursor.lastrowid
+        return conn.execute(query, (repo_id, comment, author, created_at)).lastrowid
 
 
 def get_comments(repo_id: str) -> List[Dict[str, Any]]:
     """
-    Get all comments for a repository.
+    Get all comments for a repository, newest first.
 
     Args:
-        repo_id (str): The ID of the repository.
+        repo_id (str): The repository ID.
 
     Returns:
-        List[Dict[str, Any]]: A list of dictionaries containing comment information.
+        List[Dict[str, Any]]: Comment records.
 
     Raises:
-        sqlite3.Error: If there is a database error.
+        sqlite3.Error: If the database query fails.
     """
-    query = """
-        SELECT
-            id,
-            comment,
-            author,
-            created_at
-        FROM repository_comments
-        WHERE repo_id = ?
-        ORDER BY created_at DESC
-    """
+    query = "SELECT id, comment, author, created_at FROM repository_comments WHERE repo_id = ? ORDER BY created_at DESC"
     with get_connection() as conn:
-        # Return rows as mapping of column→value
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute(query, (repo_id,))
-        return [dict(row) for row in cursor]
+        return [dict(r) for r in conn.execute(query, (repo_id,))]
 
 
 def add_version(repo_id: str, version_number: str, release_date: Optional[str] = None, description: Optional[str] = None) -> int:
@@ -480,63 +425,36 @@ def add_version(repo_id: str, version_number: str, release_date: Optional[str] =
     Add a version to a repository.
 
     Args:
-        repo_id (str): The ID of the repository.
-        version_number (str): The version number (e.g., "1.0.0").
-        release_date (Optional[str], optional): The release date in ISO format. Defaults to None.
-        description (Optional[str], optional): A description of the version. Defaults to None.
+        repo_id (str): The repository ID.
+        version_number (str): Version number.
+        release_date (Optional[str]): Release date in ISO format.
+        description (Optional[str]): Description.
 
     Returns:
-        int: The ID of the newly added version.
+        int: ID of new version.
 
     Raises:
-        sqlite3.Error: If there is a database error.
+        sqlite3.Error: If the database insert fails.
     """
-    # Get current timestamp in ISO format
     created_at = datetime.utcnow().isoformat()
-
-    query = """
-        INSERT INTO repository_versions
-            (repo_id, version_number, release_date, description, created_at)
-        VALUES (?, ?, ?, ?, ?)
-    """
+    query = "INSERT INTO repository_versions (repo_id, version_number, release_date, description, created_at) VALUES (?, ?, ?, ?, ?)"
     with get_connection() as conn:
-        # Insert the version
-        cursor = conn.execute(
-            query,
-            (repo_id, version_number, release_date, description, created_at)
-        )
-        return cursor.lastrowid
+        return conn.execute(query, (repo_id, version_number, release_date, description, created_at)).lastrowid
 
 
 def get_versions(repo_id: str) -> List[Dict[str, Any]]:
     """
-    Get all versions for a repository.
+    Get all versions for a repository, newest first.
 
     Args:
-        repo_id (str): The ID of the repository.
+        repo_id (str): The repository ID.
 
     Returns:
-        List[Dict[str, Any]]: A list of dictionaries containing version information.
+        List[Dict[str, Any]]: Version records.
 
     Raises:
-        sqlite3.Error: If there is a database error.
+        sqlite3.Error: If the database query fails.
     """
-    query = """
-        SELECT
-            id,
-            version_number,
-            release_date,
-            description,
-            created_at
-        FROM repository_versions
-        WHERE repo_id = ?
-        ORDER BY created_at DESC
-    """
-
+    query = "SELECT id, version_number, release_date, description, created_at FROM repository_versions WHERE repo_id = ? ORDER BY created_at DESC"
     with get_connection() as conn:
-        # Tell sqlite3 to give us rows that behave like dicts
-        conn.row_factory = sqlite3.Row
-        cursor = conn.execute(query, (repo_id,))
-
-        # Now each row is a sqlite3.Row, which can be cast directly to dict
-        return [dict(row) for row in cursor]
+        return [dict(r) for r in conn.execute(query, (repo_id,))]
