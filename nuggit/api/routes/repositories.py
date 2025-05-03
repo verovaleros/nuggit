@@ -7,7 +7,7 @@ from os import getenv
 from typing import Optional, Union
 from pydantic import BaseModel, Field, validator
 from fastapi import APIRouter, HTTPException, Body, Query, Depends
-from nuggit.util.db import list_all_repositories, insert_or_update_repo, get_repository, delete_repository as db_delete_repository, update_repository_fields
+from nuggit.util.db import list_all_repositories, insert_or_update_repo, get_repository, delete_repository as db_delete_repository, update_repository_fields, update_repository_metadata
 from nuggit.util.github import get_repo_info, validate_repo_url
 from github.GithubException import GithubException
 
@@ -205,6 +205,11 @@ def update_repository(repo_id: str, token: Optional[str] = None, max_retries: in
             if not repo_info:
                 raise HTTPException(status_code=404, detail=f"Repository {repo_id} not found on GitHub")
 
+            # Preserve existing tags and notes
+            if existing_repo:
+                repo_info['tags'] = existing_repo.get('tags', '')
+                repo_info['notes'] = existing_repo.get('notes', '')
+
             # Save to DB using centralized logic
             insert_or_update_repo(repo_info)
 
@@ -247,6 +252,14 @@ class RepositoryFieldsUpdate(BaseModel):
     stars: Optional[int] = Field(None, description="Number of stars")
     topics: Optional[str] = Field(None, description="Repository topics")
     commits: Optional[int] = Field(None, description="Total number of commits")
+    tags: Optional[str] = Field(None, description="Repository tags")
+    notes: Optional[str] = Field(None, description="Repository notes")
+
+
+class RepositoryMetadataUpdate(BaseModel):
+    """Model for updating repository metadata."""
+    tags: str = Field(..., description="Repository tags")
+    notes: str = Field(..., description="Repository notes")
 
 
 @router.post("/batch", summary="Import multiple repositories at once")
@@ -292,6 +305,12 @@ def batch_import_repositories(batch_input: BatchRepositoryInput = Body(...)):
                 })
                 continue
 
+            # Check if repository already exists to preserve tags and notes
+            existing_repo = get_repository(repo_id)
+            if existing_repo:
+                repo_info['tags'] = existing_repo.get('tags', '')
+                repo_info['notes'] = existing_repo.get('notes', '')
+
             # Save to DB
             insert_or_update_repo(repo_info)
 
@@ -313,6 +332,47 @@ def batch_import_repositories(batch_input: BatchRepositoryInput = Body(...)):
         "message": f"Batch import completed. {len(results['successful'])} succeeded, {len(results['failed'])} failed.",
         "results": results
     }
+
+
+@router.put("/{repo_id:path}/metadata/", summary="Update repository metadata (tags and notes)")
+def update_repository_metadata_endpoint(repo_id: str, metadata: RepositoryMetadataUpdate = Body(...)):
+    """
+    Update repository metadata (tags and notes).
+
+    Args:
+        repo_id (str): The ID of the repository.
+        metadata (RepositoryMetadataUpdate): The metadata to update.
+
+    Returns:
+        dict: A message indicating the result of the operation and the updated repository details.
+
+    Raises:
+        HTTPException: If the repository is not found or there is an error updating the metadata.
+    """
+    # Check if repository exists
+    existing_repo = get_repository(repo_id)
+    if not existing_repo:
+        raise HTTPException(status_code=404, detail=f"Repository {repo_id} not found in the database")
+
+    try:
+        # Update the metadata
+        success = update_repository_metadata(repo_id, metadata.tags, metadata.notes)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update repository metadata")
+
+        # Get the updated repository
+        updated_repo = get_repository(repo_id)
+
+        return {
+            "message": f"Repository '{repo_id}' metadata updated successfully.",
+            "repository": updated_repo
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"Error updating repository metadata for {repo_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update repository metadata: {str(e)}")
 
 
 @router.patch("/{repo_id:path}/fields", summary="Update specific repository fields")
