@@ -276,12 +276,32 @@ def get_repository_history(repo_id: str) -> list[Dict[str, Any]]:
         columns = [desc[0] for desc in cursor.description]
         return [dict(zip(columns, row)) for row in rows]
 
+
 def update_repository_metadata(repo_id: str, tags: str, notes: str) -> bool:
+    """
+    Update the tags and notes of a repository.
+
+    Args:
+        repo_id (str): The ID of the repository.
+        tags (str): Comma-separated tags.
+        notes (str): Free-form notes.
+
+    Returns:
+        bool: True if the update affected a row, False otherwise.
+
+    Raises:
+        sqlite3.Error: If there is a database error.
+    """
+    query = """
+        UPDATE repositories
+           SET tags  = ?,
+               notes = ?
+         WHERE id    = ?
+    """
+
     with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("UPDATE repositories SET tags = ?, notes = ? WHERE id = ?", (tags, notes, repo_id))
-        success = cursor.rowcount > 0
-        return success
+        result = conn.execute(query, (tags, notes, repo_id))
+        return result.rowcount > 0
 
 
 def update_repository_fields(repo_id: str, fields: Dict[str, Any]) -> bool:
