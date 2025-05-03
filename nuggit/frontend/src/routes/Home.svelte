@@ -64,7 +64,7 @@
   onMount(async () => {
     try {
       console.log('Fetching repositories...');
-      const res = await fetch('http://localhost:8000/repositories/');
+      const res = await fetch('http://localhost:8001/repositories/');
       const data = await res.json();
       allRepos = data.repositories;
       console.log('Total repositories loaded:', allRepos.length);
@@ -98,8 +98,9 @@
     const descMatch = repo.description ? repo.description.toLowerCase().includes(lower) : false;
     const idMatch = repo.id ? repo.id.toLowerCase().includes(lower) : false;
     const tagsMatch = repo.tags ? repo.tags.toLowerCase().includes(lower) : false;
+    const licenseMatch = repo.license ? repo.license.toLowerCase().includes(lower) : false;
 
-    return nameMatch || descMatch || idMatch || tagsMatch;
+    return nameMatch || descMatch || idMatch || tagsMatch || licenseMatch;
   }
 
   function sortRepositories(repos) {
@@ -142,24 +143,26 @@
     console.log(`Now showing up to ${currentDisplayCount} repositories`);
   }
 
-  // Unified reactive statement to handle filtering and sorting
-  $: {
-    // Filter repositories based on search term
-    const filtered = allRepos.filter(matchesSearch);
-
-    // Sort the filtered repositories
-    filteredRepos = sortRepositories(filtered);
-
-    // Log the result
-    console.log(`Showing ${filteredRepos.length} repositories, sorted by ${sortField} (${sortOrder})`);
-  }
-
-  // Reset display count when search term changes
+  // Reactive statement to handle search term changes
   $: if (searchTerm !== undefined) {
     console.log('Search term changed to:', searchTerm);
     // Reset to show only the first page when search changes
     currentDisplayCount = pageSize;
+
+    // Filter and sort repositories
+    const filtered = allRepos.filter(matchesSearch);
+    filteredRepos = sortRepositories(filtered);
+
+    console.log(`Showing ${filteredRepos.length} repositories, sorted by ${sortField} (${sortOrder})`);
   }
+
+  // Reactive statement to handle sort changes
+  $: if (sortField && sortOrder) {
+    console.log(`Sort changed to: ${sortField} (${sortOrder})`);
+    filteredRepos = sortRepositories(allRepos.filter(matchesSearch));
+  }
+
+  // This reactive statement has been moved above
 
   function filterByTag(tag) {
     searchTerm = tag;
@@ -227,7 +230,7 @@
     const repo_id = newRepoId.trim();
 
     try {
-      const res = await fetch('http://localhost:8000/repositories/', {
+      const res = await fetch('http://localhost:8001/repositories/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: repo_id })
@@ -241,7 +244,7 @@
       addStatus = '✅ Repository added!';
       newRepoId = '';
 
-      const data = await fetch('http://localhost:8000/repositories/').then(r => r.json());
+      const data = await fetch('http://localhost:8001/repositories/').then(r => r.json());
       allRepos = data.repositories;
       // Update filteredRepos based on current search term and sort settings
       filteredRepos = sortRepositories(allRepos.filter(matchesSearch));
@@ -278,7 +281,7 @@
     batchResults = null;
 
     try {
-      const res = await fetch('http://localhost:8000/repositories/batch', {
+      const res = await fetch('http://localhost:8001/repositories/batch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ repositories: repoIds })
@@ -299,7 +302,7 @@
       }
 
       // Refresh the repository list
-      const reposData = await fetch('http://localhost:8000/repositories/').then(r => r.json());
+      const reposData = await fetch('http://localhost:8001/repositories/').then(r => r.json());
       allRepos = reposData.repositories;
       // Update filteredRepos based on current search term and sort settings
       filteredRepos = sortRepositories(allRepos.filter(matchesSearch));
