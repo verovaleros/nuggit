@@ -385,9 +385,8 @@ def add_comment(repo_id: str, comment: str, author: str = "Anonymous") -> int:
             (repo_id, comment, author, created_at)
         VALUES (?, ?, ?, ?)
     """
-
-    # Use a UTC‐aware timestamp
-    created_at = datetime.now(timezone.utc).isoformat()
+    # Get current timestamp in ISO format
+    created_at = datetime.utcnow().isoformat()
 
     with get_connection() as conn:
         cursor = conn.execute(query, (repo_id, comment, author, created_at))
