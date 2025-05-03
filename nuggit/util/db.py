@@ -376,8 +376,12 @@ def delete_repository(repo_id: str) -> bool:
         sqlite3.Error: If any database delete operation fails.
     """
     with get_connection() as conn:
+        # Delete related data first (foreign key constraints)
         conn.execute("DELETE FROM repository_history WHERE repo_id = ?", (repo_id,))
         conn.execute("DELETE FROM repository_comments WHERE repo_id = ?", (repo_id,))
+        conn.execute("DELETE FROM repository_versions WHERE repo_id = ?", (repo_id,))
+
+        # Then delete the repository itself
         return conn.execute("DELETE FROM repositories WHERE id = ?", (repo_id,)).rowcount > 0
 
 
