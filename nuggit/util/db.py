@@ -439,24 +439,21 @@ def add_version(repo_id: str, version_number: str, release_date: Optional[str] =
     Raises:
         sqlite3.Error: If there is a database error.
     """
-    import logging
+    # Get current timestamp in ISO format
+    created_at = datetime.utcnow().isoformat()
 
+    query = """
+        INSERT INTO repository_versions
+            (repo_id, version_number, release_date, description, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    """
     with get_connection() as conn:
-        cursor = conn.cursor()
-
-        # Get current timestamp in ISO format
-        created_at = datetime.utcnow().isoformat()
-
         # Insert the version
-        cursor.execute(
-            "INSERT INTO repository_versions (repo_id, version_number, release_date, description, created_at) VALUES (?, ?, ?, ?, ?)",
+        cursor = conn.execute(
+            query,
             (repo_id, version_number, release_date, description, created_at)
         )
-
-        # Get the ID of the newly inserted version
-        version_id = cursor.lastrowid
-        logging.info(f"Added version '{version_number}' for repository {repo_id} with ID {version_id}")
-        return version_id
+        return cursor.lastrowid
 
 
 def get_versions(repo_id: str) -> List[Dict[str, Any]]:
