@@ -57,7 +57,7 @@
       const encodedRepoId = encodeURIComponent(repoId);
 
       // Fetch repository details
-      const res = await fetch(`http://localhost:8000/repositories/${encodedRepoId}`);
+      const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`);
 
       if (!res.ok) {
         throw new Error(await res.text());
@@ -69,7 +69,7 @@
 
       // Fetch versions using the new API endpoint
       try {
-        const versionsRes = await fetch(`http://localhost:8000/api/get-versions?repo_id=${encodedRepoId}`);
+        const versionsRes = await fetch(`http://localhost:8001/api/get-versions?repo_id=${encodedRepoId}`);
 
         if (versionsRes.ok) {
           const versions = await versionsRes.json();
@@ -96,12 +96,12 @@
       // Encode the repository ID for the URL
       const encodedRepoId = encodeURIComponent(repoId);
 
-      const res = await fetch(`http://localhost:8000/repositories/${encodedRepoId}/metadata`, {
-        method: 'PUT',
+      const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}/fields`, {
+        method: 'PATCH',
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ tags, notes: '' }) // Keep notes parameter for API compatibility
+        body: JSON.stringify({ tags, notes }) // Pass both tags and notes
       });
 
       if (!res.ok) {
@@ -126,7 +126,7 @@
       // Encode the repository ID for the URL
       const encodedRepoId = encodeURIComponent(repoId);
 
-      const res = await fetch(`http://localhost:8000/repositories/${encodedRepoId}`, {
+      const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`, {
         method: 'PUT'
       });
 
@@ -144,7 +144,7 @@
         // Encode the repository ID for the URL
         const encodedRepoId = encodeURIComponent(repoId);
 
-        const detailRes = await fetch(`http://localhost:8000/repositories/${encodedRepoId}`);
+        const detailRes = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`);
 
         if (!detailRes.ok) {
           throw new Error(await detailRes.text());
@@ -159,7 +159,7 @@
 
         // Fetch versions using the new API endpoint
         try {
-          const versionsRes = await fetch(`http://localhost:8000/api/get-versions?repo_id=${encodedRepoId}`);
+          const versionsRes = await fetch(`http://localhost:8001/api/get-versions?repo_id=${encodedRepoId}`);
 
           if (versionsRes.ok) {
             const versions = await versionsRes.json();
@@ -193,7 +193,7 @@
       // Encode the repository ID for the URL
       const encodedRepoId = encodeURIComponent(repoId);
 
-      const res = await fetch(`http://localhost:8000/repositories/${encodedRepoId}`, {
+      const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`, {
         method: 'DELETE'
       });
 
@@ -262,8 +262,8 @@
       const encodedRepoId = encodeURIComponent(repoId);
 
       // Use the new API endpoint that works with query parameters
-      console.log(`Using API endpoint: http://localhost:8000/api/compare-versions?repo_id=${encodedRepoId}&version1_id=${selectedVersion1}&version2_id=${selectedVersion2}`);
-      const queryRes = await fetch(`http://localhost:8000/api/compare-versions?repo_id=${encodedRepoId}&version1_id=${selectedVersion1}&version2_id=${selectedVersion2}`);
+      console.log(`Using API endpoint: http://localhost:8001/api/compare-versions?repo_id=${encodedRepoId}&version1_id=${selectedVersion1}&version2_id=${selectedVersion2}`);
+      const queryRes = await fetch(`http://localhost:8001/api/compare-versions?repo_id=${encodedRepoId}&version1_id=${selectedVersion1}&version2_id=${selectedVersion2}`);
 
       if (!queryRes.ok) {
         throw new Error(await queryRes.text());
@@ -316,7 +316,7 @@
       // Encode the repository ID for the URL
       const encodedRepoId = encodeURIComponent(repoId);
 
-      const res = await fetch(`http://localhost:8000/repositories/${encodedRepoId}/versions`, {
+      const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}/versions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -333,7 +333,7 @@
 
       // Fetch all versions to ensure we have the latest list
       try {
-        const versionsRes = await fetch(`http://localhost:8000/api/get-versions?repo_id=${encodedRepoId}`);
+        const versionsRes = await fetch(`http://localhost:8001/api/get-versions?repo_id=${encodedRepoId}`);
 
         if (versionsRes.ok) {
           const versions = await versionsRes.json();
@@ -381,7 +381,7 @@
       // Encode the repository ID for the URL
       const encodedRepoId = encodeURIComponent(repoId);
 
-      const res = await fetch(`http://localhost:8000/repositories/${encodedRepoId}/comments`, {
+      const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}/comments`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -909,14 +909,12 @@
       </tbody>
     </table>
 
-    <div style="text-align: center; margin-top: 1rem;">
-      <button on:click={saveMetadata}>💾 Save Tags</button>
-      {#if saveStatus}<p class="save-status">{saveStatus}</p>{/if}
-    </div>
 
     <div class="action-buttons">
-      <button class="update-button" on:click={updateRepository}>🔄 Update from GitHub</button>
       <button class="delete-button" on:click={confirmDelete}>🗑️ Delete Repository</button>
+      <button class="update-button" on:click={updateRepository}>🔄 Update from GitHub</button>
+      <button on:click={saveMetadata}>💾 Save Tags</button>
+      {#if saveStatus}<p class="save-status">{saveStatus}</p>{/if}
     </div>
     {#if updateStatus}<p class="update-status">{updateStatus}</p>{/if}
 
