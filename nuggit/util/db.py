@@ -349,19 +349,17 @@ def delete_repository(repo_id: str) -> bool:
     Raises:
         sqlite3.Error: If there is a database error.
     """
+    delete_history_q = "DELETE FROM repository_history WHERE repo_id = ?"
+    delete_comments_q = "DELETE FROM repository_comments WHERE repo_id = ?"
+    delete_repo_q = "DELETE FROM repositories WHERE id = ?"
+
     with get_connection() as conn:
-        cursor = conn.cursor()
+        # Clean up dependent tables
+        conn.execute(delete_history_q, (repo_id,))
+        conn.execute(delete_comments_q, (repo_id,))
 
-        # Delete repository history first (foreign key constraint)
-        cursor.execute("DELETE FROM repository_history WHERE repo_id = ?", (repo_id,))
-
-        # Delete repository comments
-        cursor.execute("DELETE FROM repository_comments WHERE repo_id = ?", (repo_id,))
-
-        # Delete the repository
-        cursor.execute("DELETE FROM repositories WHERE id = ?", (repo_id,))
-
-        # Return True if at least one row was affected
+        # Delete the repository itself and check how many rows were removed
+        cursor = conn.execute(delete_repo_q, (repo_id,))
         return cursor.rowcount > 0
 
 
