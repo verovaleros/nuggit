@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from nuggit.api.routes import repositories
 from nuggit.api.routes import detail
-from nuggit.api.routes import versions
+import nuggit.api.routes.versions as versions
 
 app = FastAPI(
     title="Nuggit API",
@@ -21,10 +21,10 @@ app.add_middleware(
 
 # Include routers
 app.include_router(repositories.router, prefix="/repositories", tags=["repositories"])
-app.include_router(detail.router, prefix="/repositories", tags=["repository detail"])
-app.include_router(versions.router, prefix="/repositories", tags=["versions"])
-app.include_router(versions.compare_router, prefix="/api", tags=["version comparison"])
-app.include_router(versions.versions_router, prefix="/api", tags=["versions"])
+app.include_router(detail.router,       prefix="/repositories", tags=["repository detail"])
+app.include_router(versions.router,     prefix="/repositories", tags=["versions"])
+# version-comparison endpoints share the same router
+app.include_router(versions.router,     prefix="/api",          tags=["version comparison"])
 
 @app.get("/")
 def read_root():
