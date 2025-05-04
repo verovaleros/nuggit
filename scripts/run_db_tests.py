@@ -12,6 +12,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from tests.test_db import TestDatabase, TestDatabaseWithMocks
 from tests.test_versions import TestVersions
+from tests.test_async_db import TestAsyncDB
 
 if __name__ == "__main__":
     # Create a test suite
@@ -21,6 +22,7 @@ if __name__ == "__main__":
     suite.addTest(unittest.makeSuite(TestDatabase))
     suite.addTest(unittest.makeSuite(TestDatabaseWithMocks))
     suite.addTest(unittest.makeSuite(TestVersions))
+    suite.addTest(unittest.makeSuite(TestAsyncDB))
 
     # Run the tests
     runner = unittest.TextTestRunner(verbosity=2)

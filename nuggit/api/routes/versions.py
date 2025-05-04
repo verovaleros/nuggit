@@ -6,7 +6,7 @@ import urllib.parse
 import difflib
 import logging
 
-from nuggit.util.db import (
+from nuggit.util.async_db import (
     get_repository,
     add_version,
     get_versions,
@@ -51,7 +51,7 @@ class VersionComparisonResponse(BaseModel):
     differences: Dict[str, Any]
 
 
-def repo_or_404(
+async def repo_or_404(
     repo_id: str = Path(..., description="Repository identifier (may be URL-encoded)")
 ) -> Dict[str, Any]:
     """
@@ -67,7 +67,7 @@ def repo_or_404(
         HTTPException: If the repository is not found.
     """
     actual = urllib.parse.unquote(repo_id)
-    repo = get_repository(actual)
+    repo = await get_repository(actual)
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
     return repo
@@ -96,7 +96,7 @@ def _compare_text(a: str, b: str) -> Dict[str, Any]:
     summary="Add a version to a repository",
     response_model=VersionResponse
 )
-def add_repository_version(
+async def add_repository_version(
     repo: Dict[str, Any] = Depends(repo_or_404),
     version_data: VersionCreate = Body(...)
 ) -> VersionResponse:
@@ -113,15 +113,16 @@ def add_repository_version(
     Raises:
         HTTPException: If creation fails.
     """
-    version_id = add_version(
+    version_id = await add_version(
         repo_id=repo["id"],
         version_number=version_data.version_number,
         release_date=version_data.release_date,
         description=version_data.description
     )
     # Efficient retrieval of the created version
+    versions = await get_versions(repo["id"])
     version = next(
-        (v for v in get_versions(repo["id"]) if v["id"] == version_id),
+        (v for v in versions if v["id"] == version_id),
         None
     )
     if not version:
@@ -134,7 +135,7 @@ def add_repository_version(
     summary="Get versions for a repository",
     response_model=List[VersionResponse]
 )
-def list_versions(
+async def list_versions(
     repo: Dict[str, Any] = Depends(repo_or_404),
     limit: int = Query(20, description="Maximum number of versions to return")
 ) -> List[VersionResponse]:
@@ -151,7 +152,8 @@ def list_versions(
     Raises:
         HTTPException: If retrieval fails.
     """
-    return [VersionResponse(**v) for v in get_versions(repo["id"])[:limit]]
+    versions = await get_versions(repo["id"])
+    return [VersionResponse(**v) for v in versions[:limit]]
 
 
 @router.get(
@@ -164,7 +166,7 @@ def list_versions(
     summary="Compare two versions (alternate path)",
     response_model=VersionComparisonResponse
 )
-def compare_versions(
+async def compare_versions(
     repo: Dict[str, Any] = Depends(repo_or_404),
     version1_id: int = Query(..., description="ID of the first version"),
     version2_id: int = Query(..., description="ID of the second version")
@@ -183,7 +185,7 @@ def compare_versions(
     Raises:
         HTTPException: If versions not found or comparison fails.
     """
-    versions = get_versions(repo["id"])
+    versions = await get_versions(repo["id"])
     version_map = {v["id"]: v for v in versions}
     if version1_id not in version_map:
         raise HTTPException(status_code=404, detail=f"Version {version1_id} not found")
@@ -203,7 +205,7 @@ def compare_versions(
     summary="Get versions (query params)",
     response_model=List[VersionResponse]
 )
-def list_versions_query(
+async def list_versions_query(
     repo_id: str = Query(..., description="The repository ID"),
     limit: int = Query(20, description="Maximum number of versions to return")
 ) -> List[VersionResponse]:
@@ -220,8 +222,8 @@ def list_versions_query(
     Raises:
         HTTPException: If the repository is not found.
     """
-    repo = repo_or_404(repo_id)
-    return list_versions(repo, limit)
+    repo = await repo_or_404(repo_id)
+    return await list_versions(repo, limit)
 
 
 @router.get(
@@ -229,7 +231,7 @@ def list_versions_query(
     summary="Compare versions (query params)",
     response_model=VersionComparisonResponse
 )
-def compare_versions_query(
+async def compare_versions_query(
     repo_id: str = Query(..., description="Repository ID"),
     version1_id: int = Query(..., description="ID of the first version"),
     version2_id: int = Query(..., description="ID of the second version")
@@ -248,11 +250,11 @@ def compare_versions_query(
     Raises:
         HTTPException: If not found or comparison fails.
     """
-    repo = repo_or_404(repo_id)
-    return compare_versions(repo, version1_id, version2_id)
+    repo = await repo_or_404(repo_id)
+    return await compare_versions(repo, version1_id, version2_id)
 
 
-def get_repository_at_version(
+async def get_repository_at_version(
     repo_id: str,
     version_timestamp: str
 ) -> Dict[str, Any]:
@@ -269,11 +271,12 @@ def get_repository_at_version(
     Raises:
         HTTPException: If repository not found or timestamp invalid.
     """
-    repo = get_repository(repo_id)
+    repo = await get_repository(repo_id)
     if not repo:
         raise HTTPException(status_code=404, detail="Repository not found")
     state = repo.copy()
-    for change in sorted(get_repository_history(repo_id), key=lambda x: x["changed_at"], reverse=True):
+    history = await get_repository_history(repo_id)
+    for change in sorted(history, key=lambda x: x["changed_at"], reverse=True):
         if change["changed_at"] <= version_timestamp:
             break
         state[change["field"]] = change["old_value"]
