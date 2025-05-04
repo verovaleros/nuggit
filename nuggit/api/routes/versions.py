@@ -1,25 +1,30 @@
-"""
-API routes for repository versions.
-"""
-
-from fastapi import APIRouter, Body, HTTPException, Query, Path
+from fastapi import APIRouter, Body, HTTPException, Query, Path, Depends
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import Dict, Any, List, Optional
 from datetime import datetime
+import urllib.parse
 import difflib
+import logging
 
-from nuggit.util.db import get_repository, add_version, get_versions, get_repository_history
+from nuggit.util.db import (
+    get_repository,
+    add_version,
+    get_versions,
+    get_repository_history
+)
 
-router = APIRouter(tags=["versions"])
+logger = logging.getLogger(__name__)
 
-# Create separate routers for version-related endpoints
-compare_router = APIRouter(tags=["version comparison"])
-versions_router = APIRouter(tags=["versions"])
+# Single router for version endpoints and comparison
+router = APIRouter()
+
+# Alias for backward compatibility
+compare_router = router
 
 
 class VersionCreate(BaseModel):
     """
-    Model for creating a new version.
+    Payload for creating a new repository version.
     """
     version_number: str
     release_date: Optional[str] = None
@@ -32,109 +37,9 @@ class VersionResponse(BaseModel):
     """
     id: int
     version_number: str
-    release_date: Optional[str] = None
-    description: Optional[str] = None
+    release_date: Optional[str]
+    description: Optional[str]
     created_at: str
-
-
-@router.post("/{repo_id:path}/versions", summary="Add a version to a repository", response_model=VersionResponse)
-def add_repository_version(repo_id: str, version_data: VersionCreate = Body(...)):
-    """
-    Add a version to a repository.
-
-    Args:
-        repo_id (str): The ID of the repository.
-        version_data (VersionCreate): The version data.
-
-    Returns:
-        VersionResponse: The newly created version.
-
-    Raises:
-        HTTPException: If the repository is not found or the version creation fails.
-    """
-    # Check if repository exists
-    repo = get_repository(repo_id)
-    if not repo:
-        raise HTTPException(status_code=404, detail="Repository not found")
-
-    try:
-        # Add the version
-        version_id = add_version(
-            repo_id=repo_id,
-            version_number=version_data.version_number,
-            release_date=version_data.release_date,
-            description=version_data.description
-        )
-
-        # Get all versions to find the newly added one
-        all_versions = get_versions(repo_id)
-        new_version = next((v for v in all_versions if v["id"] == version_id), None)
-
-        if not new_version:
-            raise HTTPException(status_code=500, detail="Version was added but could not be retrieved")
-
-        return new_version
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to add version: {str(e)}")
-
-
-@router.get("/{repo_id:path}/versions", summary="Get versions for a repository", response_model=List[VersionResponse])
-def get_repository_versions(repo_id: str, limit: int = Query(20, description="Maximum number of versions to return")):
-    """
-    Get versions for a repository.
-
-    Args:
-        repo_id (str): The ID of the repository.
-        limit (int, optional): Maximum number of versions to return. Defaults to 20.
-
-    Returns:
-        List[VersionResponse]: A list of versions.
-
-    Raises:
-        HTTPException: If the repository is not found or the versions retrieval fails.
-    """
-    # Check if repository exists
-    import logging
-    logging.info(f"Getting versions for repo_id: {repo_id}")
-
-    # Handle the case where the URL path might include '/versions'
-    # This is a workaround for the routing issue
-    if '/versions' in repo_id:
-        actual_repo_id = repo_id.split('/versions')[0]
-        logging.info(f"Extracted actual repo_id from path: {actual_repo_id}")
-        repo = get_repository(actual_repo_id)
-        # Use the actual repo_id for the rest of the function
-        repo_id = actual_repo_id
-    else:
-        repo = get_repository(repo_id)
-
-    # If repo is still None, try to decode the repo_id as it might be URL-encoded
-    if not repo:
-        try:
-            import urllib.parse
-            decoded_repo_id = urllib.parse.unquote(repo_id)
-            if decoded_repo_id != repo_id:
-                logging.info(f"Trying with decoded repo_id: {decoded_repo_id}")
-                repo = get_repository(decoded_repo_id)
-                if repo:
-                    repo_id = decoded_repo_id
-        except Exception as e:
-            logging.error(f"Error decoding repo_id: {e}")
-
-    if not repo:
-        logging.error(f"Repository not found: {repo_id}")
-        raise HTTPException(status_code=404, detail="Repository not found")
-
-    logging.info(f"Repository found: {repo_id}")
-
-    try:
-        # Get versions
-        versions = get_versions(repo_id)
-
-        # Limit the number of versions
-        return versions[:limit]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get versions: {str(e)}")
 
 
 class VersionComparisonResponse(BaseModel):
@@ -146,280 +51,230 @@ class VersionComparisonResponse(BaseModel):
     differences: Dict[str, Any]
 
 
-@router.get("/{repo_id:path}/versions/compare", summary="Compare two versions", response_model=VersionComparisonResponse)
-@router.get("/{repo_id:path}/compare", summary="Compare two versions (alternate path)", response_model=VersionComparisonResponse)
+def repo_or_404(
+    repo_id: str = Path(..., description="Repository identifier (may be URL-encoded)")
+) -> Dict[str, Any]:
+    """
+    Dependency: resolve repository ID, raising 404 if not found.
+
+    Args:
+        repo_id (str): The ID of the repository.
+
+    Returns:
+        dict: A dictionary containing the repository details.
+
+    Raises:
+        HTTPException: If the repository is not found.
+    """
+    actual = urllib.parse.unquote(repo_id)
+    repo = get_repository(actual)
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    return repo
+
+
+def _compare_text(a: str, b: str) -> Dict[str, Any]:
+    """
+    Compare two text fields, returning whether they differ and a unified diff.
+
+    Args:
+        a (str): The first text to compare.
+        b (str): The second text to compare.
+
+    Returns:
+        dict: A dictionary containing the comparison results.
+    """
+    changed = a != b
+    diff = list(difflib.unified_diff([a or ""], [b or ""], lineterm=""))
+    if len(diff) > 2 and diff[0].startswith('---'):
+        diff = diff[2:]
+    return {"changed": changed, "diff": diff}
+
+
+@router.post(
+    "/{repo_id:path}/versions",
+    summary="Add a version to a repository",
+    response_model=VersionResponse
+)
+def add_repository_version(
+    repo: Dict[str, Any] = Depends(repo_or_404),
+    version_data: VersionCreate = Body(...)
+) -> VersionResponse:
+    """
+    Add a version to a repository.
+
+    Args:
+        repo: Resolved repository record.
+        version_data: Version payload.
+
+    Returns:
+        VersionResponse: The newly created version.
+
+    Raises:
+        HTTPException: If creation fails.
+    """
+    version_id = add_version(
+        repo_id=repo["id"],
+        version_number=version_data.version_number,
+        release_date=version_data.release_date,
+        description=version_data.description
+    )
+    # Efficient retrieval of the created version
+    version = next(
+        (v for v in get_versions(repo["id"]) if v["id"] == version_id),
+        None
+    )
+    if not version:
+        raise HTTPException(status_code=500, detail="Created version not found")
+    return VersionResponse(**version)
+
+
+@router.get(
+    "/{repo_id:path}/versions",
+    summary="Get versions for a repository",
+    response_model=List[VersionResponse]
+)
+def list_versions(
+    repo: Dict[str, Any] = Depends(repo_or_404),
+    limit: int = Query(20, description="Maximum number of versions to return")
+) -> List[VersionResponse]:
+    """
+    Get versions for a repository.
+
+    Args:
+        repo: Resolved repository record.
+        limit: Maximum number of versions.
+
+    Returns:
+        List[VersionResponse]: List of versions.
+
+    Raises:
+        HTTPException: If retrieval fails.
+    """
+    return [VersionResponse(**v) for v in get_versions(repo["id"])[:limit]]
+
+
+@router.get(
+    "/{repo_id:path}/versions/compare",
+    summary="Compare two versions",
+    response_model=VersionComparisonResponse
+)
+@router.get(
+    "/{repo_id:path}/compare",
+    summary="Compare two versions (alternate path)",
+    response_model=VersionComparisonResponse
+)
 def compare_versions(
-    repo_id: str,
+    repo: Dict[str, Any] = Depends(repo_or_404),
     version1_id: int = Query(..., description="ID of the first version"),
     version2_id: int = Query(..., description="ID of the second version")
-):
-    # Debug logging
-    import logging
-    logging.info(f"Comparing versions for repo_id: {repo_id}, version1_id: {version1_id}, version2_id: {version2_id}")
+) -> VersionComparisonResponse:
     """
     Compare two versions of a repository.
 
     Args:
-        repo_id (str): The ID of the repository.
-        version1_id (int): The ID of the first version.
-        version2_id (int): The ID of the second version.
+        repo: Resolved repository record.
+        version1_id: ID of the first version.
+        version2_id: ID of the second version.
 
     Returns:
         VersionComparisonResponse: The comparison result.
 
     Raises:
-        HTTPException: If the repository or versions are not found, or the comparison fails.
+        HTTPException: If versions not found or comparison fails.
     """
-    # Check if repository exists
-    import logging
-    logging.info(f"Checking if repository exists: {repo_id}")
-
-    # Handle the case where the URL path might include '/versions/compare' or '/compare'
-    # This is a workaround for the routing issue
-    if '/versions/compare' in repo_id:
-        actual_repo_id = repo_id.split('/versions/compare')[0]
-        logging.info(f"Extracted actual repo_id from path: {actual_repo_id}")
-        repo = get_repository(actual_repo_id)
-    elif '/compare' in repo_id:
-        actual_repo_id = repo_id.split('/compare')[0]
-        logging.info(f"Extracted actual repo_id from path: {actual_repo_id}")
-        repo = get_repository(actual_repo_id)
-    else:
-        repo = get_repository(repo_id)
-
-    if not repo:
-        logging.error(f"Repository not found: {repo_id}")
-        raise HTTPException(status_code=404, detail="Repository not found")
-
-    # Use the actual repo_id for the rest of the function
-    if '/versions/compare' in repo_id or '/compare' in repo_id:
-        repo_id = actual_repo_id
-
-    logging.info(f"Repository found: {repo_id}")
-
-    try:
-        # Get all versions for the repository
-        all_versions = get_versions(repo_id)
-
-        # Find the specified versions
-        version1 = next((v for v in all_versions if v["id"] == version1_id), None)
-        version2 = next((v for v in all_versions if v["id"] == version2_id), None)
-
-        if not version1:
-            raise HTTPException(status_code=404, detail=f"Version with ID {version1_id} not found")
-
-        if not version2:
-            raise HTTPException(status_code=404, detail=f"Version with ID {version2_id} not found")
-
-        # Compare the versions
-        differences = {
-            "version_number": compare_text(version1["version_number"], version2["version_number"]),
-            "release_date": compare_text(version1["release_date"], version2["release_date"]),
-            "description": compare_text(version1["description"], version2["description"]),
-            "created_at": compare_text(version1["created_at"], version2["created_at"])
-        }
-
-        return {
-            "version1": version1,
-            "version2": version2,
-            "differences": differences
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to compare versions: {str(e)}")
+    versions = get_versions(repo["id"])
+    version_map = {v["id"]: v for v in versions}
+    if version1_id not in version_map:
+        raise HTTPException(status_code=404, detail=f"Version {version1_id} not found")
+    if version2_id not in version_map:
+        raise HTTPException(status_code=404, detail=f"Version {version2_id} not found")
+    v1, v2 = version_map[version1_id], version_map[version2_id]
+    differences = {
+        "version_number": _compare_text(v1["version_number"], v2["version_number"]),
+        "release_date": _compare_text(v1.get("release_date", ""), v2.get("release_date", "")),
+        "description": _compare_text(v1.get("description", ""), v2.get("description", ""))
+    }
+    return VersionComparisonResponse(version1=v1, version2=v2, differences=differences)
 
 
-# New endpoint for getting versions that doesn't use path parameters for the repository ID
-@versions_router.get("/get-versions", summary="Get versions for a repository (query params)")
-def get_versions_query(repo_id: str = Query(..., description="The ID of the repository"), limit: int = Query(20, description="Maximum number of versions to return")):
+@router.get(
+    "/get-versions",
+    summary="Get versions (query params)",
+    response_model=List[VersionResponse]
+)
+def list_versions_query(
+    repo_id: str = Query(..., description="The repository ID"),
+    limit: int = Query(20, description="Maximum number of versions to return")
+) -> List[VersionResponse]:
     """
-    Get versions for a repository using query parameters.
+    Query-parameter-based endpoint for listing versions.
 
     Args:
-        repo_id (str): The ID of the repository.
-        limit (int, optional): Maximum number of versions to return. Defaults to 20.
+        repo_id: Repository ID.
+        limit: Maximum number of versions.
 
     Returns:
-        List[Dict[str, Any]]: A list of versions.
+        List[VersionResponse]: List of versions.
 
     Raises:
-        HTTPException: If the repository is not found or the versions retrieval fails.
+        HTTPException: If the repository is not found.
     """
-    # Debug logging
-    import logging
-    logging.info(f"Getting versions using query params - repo_id: {repo_id}")
-
-    # Check if repository exists
-    repo = get_repository(repo_id)
-    if not repo:
-        logging.error(f"Repository not found: {repo_id}")
-        raise HTTPException(status_code=404, detail="Repository not found")
-
-    logging.info(f"Repository found: {repo_id}")
-
-    try:
-        # Get versions
-        versions = get_versions(repo_id)
-
-        # Limit the number of versions
-        return versions[:limit]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get versions: {str(e)}")
+    repo = repo_or_404(repo_id)
+    return list_versions(repo, limit)
 
 
-# New endpoint for version comparison that doesn't use path parameters for the repository ID
-@compare_router.get("/compare-versions", summary="Compare two versions (query params)", response_model=VersionComparisonResponse)
+@router.get(
+    "/compare-versions",
+    summary="Compare versions (query params)",
+    response_model=VersionComparisonResponse
+)
 def compare_versions_query(
-    repo_id: str = Query(..., description="The ID of the repository"),
+    repo_id: str = Query(..., description="Repository ID"),
     version1_id: int = Query(..., description="ID of the first version"),
     version2_id: int = Query(..., description="ID of the second version")
-):
+) -> VersionComparisonResponse:
     """
-    Compare two versions of a repository using query parameters.
+    Query-parameter-based endpoint for comparing versions.
 
     Args:
-        repo_id (str): The ID of the repository.
-        version1_id (int): The ID of the first version.
-        version2_id (int): The ID of the second version.
+        repo_id: Repository ID.
+        version1_id: First version ID.
+        version2_id: Second version ID.
 
     Returns:
         VersionComparisonResponse: The comparison result.
 
     Raises:
-        HTTPException: If the repository or versions are not found, or the comparison fails.
+        HTTPException: If not found or comparison fails.
     """
-    # Debug logging
-    import logging
-    logging.info(f"Comparing versions using query params - repo_id: {repo_id}, version1_id: {version1_id}, version2_id: {version2_id}")
-
-    # Check if repository exists
-    repo = get_repository(repo_id)
-    if not repo:
-        logging.error(f"Repository not found: {repo_id}")
-        raise HTTPException(status_code=404, detail="Repository not found")
-
-    logging.info(f"Repository found: {repo_id}")
-
-    try:
-        # Get all versions for the repository
-        all_versions = get_versions(repo_id)
-
-        # Find the specified versions
-        version1 = next((v for v in all_versions if v["id"] == version1_id), None)
-        version2 = next((v for v in all_versions if v["id"] == version2_id), None)
-
-        if not version1:
-            raise HTTPException(status_code=404, detail=f"Version with ID {version1_id} not found")
-
-        if not version2:
-            raise HTTPException(status_code=404, detail=f"Version with ID {version2_id} not found")
-
-        # Get repository data for both versions
-        repo_data1 = get_repository_at_version(repo_id, version1["created_at"])
-        repo_data2 = get_repository_at_version(repo_id, version2["created_at"])
-
-        # Compare the versions
-        differences = {
-            "version_number": compare_text(version1["version_number"], version2["version_number"]),
-            "release_date": compare_text(version1["release_date"], version2["release_date"]),
-            "description": compare_text(version1["description"], version2["description"]),
-            "created_at": compare_text(version1["created_at"], version2["created_at"]),
-            # Add repository data comparisons
-            "license": compare_text(repo_data1.get("license"), repo_data2.get("license")),
-            "stars": compare_text(str(repo_data1.get("stars")), str(repo_data2.get("stars"))),
-            "topics": compare_text(repo_data1.get("topics"), repo_data2.get("topics")),
-            "commits": compare_text(str(repo_data1.get("commits")), str(repo_data2.get("commits")))
-        }
-
-        return {
-            "version1": version1,
-            "version2": version2,
-            "differences": differences
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to compare versions: {str(e)}")
+    repo = repo_or_404(repo_id)
+    return compare_versions(repo, version1_id, version2_id)
 
 
-def get_repository_at_version(repo_id: str, version_timestamp: str) -> Dict[str, Any]:
+def get_repository_at_version(
+    repo_id: str,
+    version_timestamp: str
+) -> Dict[str, Any]:
     """
     Get repository data as it was at the time of a specific version.
 
     Args:
-        repo_id (str): The ID of the repository.
-        version_timestamp (str): The timestamp of the version.
+        repo_id: ID of the repository.
+        version_timestamp: ISO timestamp of the target version.
 
     Returns:
-        Dict[str, Any]: Repository data at the time of the version.
+        Dict[str, Any]: Repository fields at that version.
+
+    Raises:
+        HTTPException: If repository not found or timestamp invalid.
     """
-    import logging
-
-    # Get current repository data
-    current_repo = get_repository(repo_id)
-    if not current_repo:
-        return {}
-
-    # Make a copy of the current repository data
-    repo_at_version = dict(current_repo)
-
-    # Get repository history
-    history = get_repository_history(repo_id)
-
-    # Sort history by changed_at in descending order (newest first)
-    history = sorted(history, key=lambda x: x["changed_at"], reverse=True)
-
-    # Apply changes in reverse chronological order until we reach the version timestamp
-    for change in history:
-        # Skip changes that happened before or at the version timestamp
+    repo = get_repository(repo_id)
+    if not repo:
+        raise HTTPException(status_code=404, detail="Repository not found")
+    state = repo.copy()
+    for change in sorted(get_repository_history(repo_id), key=lambda x: x["changed_at"], reverse=True):
         if change["changed_at"] <= version_timestamp:
-            continue
-
-        # Revert the change (set the field back to its old value)
-        field = change["field"]
-        if field in repo_at_version and field in ["license", "stars", "topics", "commits"]:
-            logging.info(f"Reverting {field} from '{repo_at_version[field]}' to '{change['old_value']}' for version at {version_timestamp}")
-            repo_at_version[field] = change["old_value"]
-
-    return repo_at_version
-
-
-def compare_text(text1, text2):
-    """
-    Compare two text strings and return the differences.
-
-    Args:
-        text1: The first text string (or None).
-        text2: The second text string (or None).
-
-    Returns:
-        dict: A dictionary containing the comparison result.
-    """
-    # Handle None values
-    text1 = str(text1) if text1 is not None else ""
-    text2 = str(text2) if text2 is not None else ""
-
-    # If both texts are the same, return a simple result
-    if text1 == text2:
-        return {
-            "changed": False,
-            "diff": None
-        }
-
-    # Generate a unified diff
-    diff = list(difflib.unified_diff(
-        text1.splitlines(),
-        text2.splitlines(),
-        lineterm="",
-        n=0
-    ))
-
-    # Remove the headers (first two lines)
-    if len(diff) > 2:
-        diff = diff[2:]
-
-    return {
-        "changed": True,
-        "diff": "\n".join(diff) if diff else "Content changed but no line-by-line diff available"
-    }
+            break
+        state[change["field"]] = change["old_value"]
+    return state
