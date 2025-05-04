@@ -329,6 +329,43 @@ class TestDatabase(unittest.TestCase):
         today = datetime.utcnow().date().strftime("%Y.%m.%d")
         self.assertEqual(versions[0]["version_number"], today)
 
+    def test_create_repository_version(self):
+        """Test creating a new version when a repository is updated from GitHub."""
+        # Insert a repository
+        db.insert_or_update_repo(self.sample_repo)
+
+        # Clear existing versions to simplify testing
+        with db.get_connection() as conn:
+            conn.execute("DELETE FROM repository_versions WHERE repo_id = ?", (self.sample_repo["id"],))
+
+        # Create a new version
+        version_id = db.create_repository_version(self.sample_repo["id"], self.updated_repo)
+
+        # Verify the version was created
+        self.assertIsInstance(version_id, int)
+
+        # Get versions
+        versions = db.get_versions(self.sample_repo["id"])
+
+        # Verify the version was retrieved correctly
+        self.assertEqual(len(versions), 1)
+
+        # The version should be named with today's date in YYYY.MM.DD format
+        today = datetime.utcnow().date().strftime("%Y.%m.%d")
+        self.assertEqual(versions[0]["version_number"], today)
+
+        # Create another version on the same day
+        version_id2 = db.create_repository_version(self.sample_repo["id"], self.updated_repo)
+
+        # Get versions again
+        versions = db.get_versions(self.sample_repo["id"])
+
+        # Verify we now have two versions
+        self.assertEqual(len(versions), 2)
+
+        # The second version should have a suffix
+        self.assertEqual(versions[0]["version_number"], f"{today}.2")
+
     def test_update_repository_fields(self):
         """Test updating specific repository fields."""
         # Insert a repository
@@ -675,6 +712,65 @@ class TestDatabaseWithMocks(unittest.TestCase):
         self.assertEqual(versions[0]["version_number"], "1.0.0")
         self.assertEqual(versions[1]["id"], 2)
         self.assertEqual(versions[1]["version_number"], "2.0.0")
+
+    def test_create_repository_version_with_mock(self):
+        """Test create_repository_version with mocks."""
+        # Set up the mock to return an empty list for get_versions
+        self.mock_conn.execute.return_value.__iter__.return_value = []
+
+        # Mock cursor.lastrowid to return 1 (ID of the new version)
+        self.mock_cursor.lastrowid = 1
+
+        # Call the function
+        result = db.create_repository_version(self.sample_repo["id"], self.sample_repo)
+
+        # Verify the result
+        self.assertEqual(result, 1)
+
+        # Verify the connection.execute was called
+        self.assertGreaterEqual(self.mock_conn.execute.call_count, 2)
+
+        # Check the INSERT query
+        insert_calls = [call for call in self.mock_conn.execute.call_args_list
+                        if len(call[0]) > 0 and "INSERT INTO repository_versions" in call[0][0]]
+        self.assertEqual(len(insert_calls), 1)
+
+        # Now test with existing versions on the same day
+        # Create a mock row for an existing version with today's date
+        today = datetime.utcnow().date().strftime("%Y.%m.%d")
+        mock_data = {
+            'id': 1,
+            'version_number': today,
+            'release_date': '2023-01-01',
+            'description': 'Test version',
+            'created_at': '2023-01-01T00:00:00'
+        }
+
+        mock_row = MagicMock()
+        mock_row.__getitem__.side_effect = lambda key: mock_data.get(key)
+        mock_row.keys.return_value = mock_data.keys()
+        def mock_iter():
+            for key in mock_data:
+                yield key, mock_data[key]
+        mock_row.__iter__.side_effect = mock_iter
+
+        # Reset the mock and set up to return our mock row
+        self.mock_conn.reset_mock()
+        self.mock_conn.execute.return_value.__iter__.return_value = [mock_row]
+
+        # Call the function again
+        result = db.create_repository_version(self.sample_repo["id"], self.sample_repo)
+
+        # Verify the result
+        self.assertEqual(result, 1)
+
+        # Check that the version number has a suffix
+        insert_calls = [call for call in self.mock_conn.execute.call_args_list
+                        if len(call[0]) > 0 and "INSERT INTO repository_versions" in call[0][0]]
+        self.assertEqual(len(insert_calls), 1)
+
+        # The version number should have a .2 suffix
+        self.assertEqual(insert_calls[0][0][1][1], f"{today}.2")
 
     def test_update_repository_fields_with_mock(self):
         """Test update_repository_fields with mocks."""
