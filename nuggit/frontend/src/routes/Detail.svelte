@@ -25,8 +25,12 @@
   let versionsCollapsed = true;
 
   // Version tracker
-  let newVersion = '';
-  let versionReleaseDate = '';
+  // Set today's date as default
+  let today = new Date();
+  let formattedDate = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  // Use today's date for version name too
+  let newVersion = `v${today.getFullYear()}.${today.getMonth() + 1}.${today.getDate()}`;
+  let versionReleaseDate = formattedDate;
   let versionDescription = '';
   let versionStatus = '';
   let addingVersion = false;
@@ -297,6 +301,63 @@
     }).join('\n');
   }
 
+  // Format date to human-readable format
+  function formatDate(dateString) {
+    if (!dateString) return 'N/A';
+
+    try {
+      const date = new Date(dateString);
+
+      // Check if date is valid
+      if (isNaN(date.getTime())) return dateString;
+
+      // Format options
+      const options = {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      };
+
+      return date.toLocaleDateString(undefined, options);
+    } catch (error) {
+      console.error('Error formatting date:', error);
+      return dateString;
+    }
+  }
+
+  // Format relative time (e.g., "2 days ago")
+  function formatRelativeTime(dateString) {
+    if (!dateString) return 'N/A';
+
+    try {
+      const date = new Date(dateString);
+
+      // Check if date is valid
+      if (isNaN(date.getTime())) return dateString;
+
+      const now = new Date();
+      const diffMs = now - date;
+      const diffSec = Math.floor(diffMs / 1000);
+      const diffMin = Math.floor(diffSec / 60);
+      const diffHour = Math.floor(diffMin / 60);
+      const diffDay = Math.floor(diffHour / 24);
+      const diffMonth = Math.floor(diffDay / 30);
+      const diffYear = Math.floor(diffDay / 365);
+
+      if (diffSec < 60) return 'just now';
+      if (diffMin < 60) return `${diffMin} minute${diffMin === 1 ? '' : 's'} ago`;
+      if (diffHour < 24) return `${diffHour} hour${diffHour === 1 ? '' : 's'} ago`;
+      if (diffDay < 30) return `${diffDay} day${diffDay === 1 ? '' : 's'} ago`;
+      if (diffMonth < 12) return `${diffMonth} month${diffMonth === 1 ? '' : 's'} ago`;
+      return `${diffYear} year${diffYear === 1 ? '' : 's'} ago`;
+    } catch (error) {
+      console.error('Error formatting relative time:', error);
+      return dateString;
+    }
+  }
+
   async function addVersion() {
     if (!newVersion.trim()) {
       versionStatus = 'Please enter a version number.';
@@ -421,25 +482,113 @@
 
 <style>
   .container {
-    max-width: 960px;
+    max-width: 1200px;
     margin: 2rem auto;
     font-family: sans-serif;
   }
 
   h1, h2 {
-    text-align: center;
-    margin-bottom: 1.5rem;
+    margin-bottom: 1rem;
   }
 
+  /* Two-column layout */
+  .repo-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .repo-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .info-card {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    padding: 1.5rem;
+  }
+
+  .info-card h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    color: #1f2937;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 0.5rem;
+  }
+
+  .info-item {
+    display: flex;
+    padding: 0.75rem;
+    border-radius: 4px;
+  }
+
+  .info-item:nth-child(odd) {
+    background-color: #f9fafb;
+  }
+
+  .info-item:nth-child(even) {
+    background-color: #ffffff;
+  }
+
+  .info-item:hover {
+    background-color: #f3f4f6;
+  }
+
+  .info-label {
+    font-weight: bold;
+    width: 40%;
+    color: #4b5563;
+  }
+
+  .info-value {
+    width: 60%;
+  }
+
+  .topic-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .topic-pill {
+    background-color: #e0f2fe;
+    color: #0369a1;
+    padding: 0.25rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    display: inline-flex;
+    align-items: center;
+    transition: all 0.2s ease;
+  }
+
+  .topic-pill:hover {
+    background-color: #bae6fd;
+    transform: translateY(-1px);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  }
+
+  .no-topics {
+    color: #9ca3af;
+    font-style: italic;
+  }
+
+  /* Table styles for commits */
   table {
     width: 100%;
     border-collapse: collapse;
     margin-top: 1rem;
     box-shadow: 0 0 8px rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    overflow: hidden;
   }
 
   th, td {
-    padding: 1rem;
+    padding: 0.75rem 1rem;
     text-align: left;
     border-bottom: 1px solid #eee;
   }
@@ -447,11 +596,18 @@
   th {
     background-color: #1f2937;
     color: white;
-    width: 30%;
   }
 
   td {
     background-color: #fff;
+  }
+
+  tr:nth-child(even) td {
+    background-color: #f9fafb;
+  }
+
+  tr:hover td {
+    background-color: #f3f4f6;
   }
 
   input, textarea {
@@ -465,34 +621,98 @@
 
   button {
     padding: 0.6rem 1.2rem;
-    font-weight: bold;
+    font-weight: 600;
     background-color: #1f2937;
     color: white;
     border: none;
     border-radius: 6px;
     cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
   }
 
   button:hover {
     background-color: #374151;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+
+  button:active {
+    transform: translateY(0);
   }
 
   .error {
-    color: red;
+    color: #dc2626;
     text-align: center;
+    padding: 0.75rem;
+    background-color: #fee2e2;
+    border-radius: 6px;
+    margin: 1rem 0;
   }
 
-  .save-status, .update-status {
+  .status-message {
     margin-top: 0.5rem;
     text-align: center;
     font-style: italic;
+    padding: 0.5rem;
+    border-radius: 6px;
+    background-color: #f3f4f6;
+    transition: opacity 0.3s ease;
+  }
+
+  .status-success {
+    background-color: #d1fae5;
+    color: #065f46;
+  }
+
+  .status-error {
+    background-color: #fee2e2;
+    color: #b91c1c;
+  }
+
+  .status-loading {
+    background-color: #e0f2fe;
+    color: #0369a1;
+  }
+
+  .tags-actions-container {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .tags-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .tags-container label {
+    font-weight: 600;
+    color: #374151;
+  }
+
+  .tags-container input {
+    padding: 0.75rem;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 1rem;
   }
 
   .action-buttons {
     display: flex;
-    justify-content: center;
-    gap: 1rem;
-    margin-top: 1rem;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
   }
 
   .update-button {
@@ -509,6 +729,14 @@
 
   .delete-button:hover {
     background-color: #dc2626;
+  }
+
+  .save-button {
+    background-color: #059669;
+  }
+
+  .save-button:hover {
+    background-color: #047857;
   }
 
   .modal-overlay {
@@ -560,44 +788,63 @@
 
   .comments-list {
     margin-top: 1rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1rem;
   }
 
   .comment {
     background-color: #f9fafb;
     border-radius: 8px;
     padding: 1rem;
-    margin-bottom: 1rem;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    border-left: 4px solid #4f46e5;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
   }
 
   .comment-header {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.75rem;
     font-size: 0.9rem;
     color: #6b7280;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 0.5rem;
   }
 
   .comment-author {
     font-weight: bold;
+    color: #4f46e5;
   }
 
   .comment-content {
     white-space: pre-wrap;
     word-break: break-word;
+    flex-grow: 1;
+    font-size: 0.95rem;
+    line-height: 1.5;
   }
 
   .comment-form {
-    margin-top: 1rem;
-    background-color: #f9fafb;
+    margin-bottom: 1.5rem;
+    background-color: white;
     border-radius: 8px;
-    padding: 1rem;
+    padding: 1.25rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    border: 1px solid #e5e7eb;
   }
 
   .comment-form textarea {
     width: 100%;
     min-height: 100px;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.75rem;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    padding: 0.75rem;
+    font-size: 0.95rem;
+    resize: vertical;
   }
 
   .comment-form-header {
@@ -609,6 +856,9 @@
 
   .comment-form-header input {
     width: 200px;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
   }
 
   .comment-status, .version-status {
@@ -624,28 +874,42 @@
 
   .versions-list {
     margin-top: 1rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1rem;
   }
 
   .version {
-    background-color: #f9fafb;
+    background-color: white;
     border-radius: 8px;
-    padding: 1rem;
-    margin-bottom: 1rem;
+    padding: 1.25rem;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    border-left: 4px solid #059669;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .version:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   }
 
   .version-header {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.75rem;
     font-size: 0.9rem;
     color: #6b7280;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 0.75rem;
   }
 
   .version-number {
     font-weight: bold;
     font-size: 1.1rem;
-    color: #1f2937;
+    color: #059669;
   }
 
   .version-date {
@@ -656,59 +920,101 @@
     white-space: pre-wrap;
     word-break: break-word;
     margin-top: 0.5rem;
+    flex-grow: 1;
+    font-size: 0.95rem;
+    line-height: 1.5;
   }
 
   .version-form {
-    margin-top: 1rem;
-    background-color: #f9fafb;
-    border-radius: 8px;
-    padding: 1rem;
-  }
-
-  .version-form-row {
-    display: flex;
-    gap: 1rem;
     margin-bottom: 1rem;
-  }
-
-  .version-form-row .field {
-    flex: 1;
-  }
-
-  .version-form-row label {
-    display: block;
-    margin-bottom: 0.5rem;
-    font-weight: bold;
-    font-size: 0.9rem;
-  }
-
-  .version-form textarea {
-    width: 100%;
-    min-height: 100px;
-    margin-bottom: 0.5rem;
-  }
-
-  /* Version comparison styles */
-  .comparison-container {
-    margin-top: 1.5rem;
     background-color: #f9fafb;
     border-radius: 8px;
     padding: 1rem;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   }
 
+  .version-form-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .version-form-row input {
+    padding: 0.6rem;
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    height: 40px;
+  }
+
+  .version-form-row input[type="text"]:first-child {
+    width: 180px;
+  }
+
+  .version-form-row input[type="date"] {
+    width: 150px;
+  }
+
+  .version-form-row input[type="text"]:nth-child(3) {
+    flex: 1;
+  }
+
+  @media (max-width: 768px) {
+    .version-form-row {
+      flex-wrap: wrap;
+    }
+
+    .version-form-row input[type="text"]:first-child,
+    .version-form-row input[type="date"],
+    .version-form-row input[type="text"]:nth-child(3) {
+      width: 100%;
+    }
+  }
+
+  .add-version-button {
+    background-color: #059669;
+    white-space: nowrap;
+    height: 40px;
+    padding: 0 1rem;
+  }
+
+  .add-version-button:hover {
+    background-color: #047857;
+  }
+
+  @media (max-width: 768px) {
+    .add-version-button {
+      width: 100%;
+      margin-top: 0.5rem;
+    }
+  }
+
+  /* Version comparison styles */
+  .comparison-container {
+    margin-top: 1.5rem;
+    background-color: white;
+    border-radius: 8px;
+    padding: 1.5rem;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    border: 1px solid #e5e7eb;
+  }
+
   .comparison-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 1rem;
-    padding-bottom: 0.5rem;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.75rem;
     border-bottom: 1px solid #e5e7eb;
   }
 
   .comparison-header h3 {
     margin: 0;
     font-size: 1.2rem;
+    color: #1f2937;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
   }
 
   .comparison-header button {
@@ -717,67 +1023,102 @@
   }
 
   .comparison-selectors {
-    display: flex;
-    gap: 1rem;
-    margin-bottom: 1rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  @media (max-width: 640px) {
+    .comparison-selectors {
+      grid-template-columns: 1fr;
+    }
   }
 
   .comparison-selector {
-    flex: 1;
+    background-color: #f9fafb;
+    padding: 1rem;
+    border-radius: 6px;
+    border: 1px solid #e5e7eb;
   }
 
   .comparison-selector label {
     display: block;
     margin-bottom: 0.5rem;
-    font-weight: bold;
+    font-weight: 600;
     font-size: 0.9rem;
+    color: #374151;
   }
 
   .comparison-selector select {
     width: 100%;
-    padding: 0.5rem;
+    padding: 0.6rem;
     border-radius: 6px;
-    border: 1px solid #ccc;
+    border: 1px solid #d1d5db;
+    background-color: white;
+    font-size: 0.95rem;
   }
 
   .comparison-results {
     margin-top: 1.5rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
   }
 
   .comparison-field {
-    margin-bottom: 1.5rem;
+    background-color: #f9fafb;
+    border-radius: 8px;
+    padding: 1rem;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
   }
 
   .comparison-field h4 {
     margin-top: 0;
-    margin-bottom: 0.5rem;
+    margin-bottom: 0.75rem;
     font-size: 1rem;
+    color: #1f2937;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #e5e7eb;
   }
 
   .diff-display {
-    font-family: monospace;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     white-space: pre-wrap;
-    background-color: #f1f5f9;
+    background-color: #f8fafc;
     padding: 1rem;
     border-radius: 6px;
     border: 1px solid #e2e8f0;
     overflow-x: auto;
+    font-size: 0.9rem;
+    line-height: 1.5;
   }
 
   .diff-line-added {
     color: #16a34a;
     background-color: #dcfce7;
+    display: block;
+    padding: 0.1rem 0.3rem;
+    margin: 0.1rem 0;
+    border-radius: 3px;
   }
 
   .diff-line-removed {
     color: #dc2626;
     background-color: #fee2e2;
+    display: block;
+    padding: 0.1rem 0.3rem;
+    margin: 0.1rem 0;
+    border-radius: 3px;
   }
 
   .comparison-error {
     color: #dc2626;
     text-align: center;
     margin: 1rem 0;
+    padding: 0.75rem;
+    background-color: #fee2e2;
+    border-radius: 6px;
   }
 
   .comparison-loading {
@@ -785,6 +1126,9 @@
     margin: 1rem 0;
     font-style: italic;
     color: #6b7280;
+    padding: 1rem;
+    background-color: #f3f4f6;
+    border-radius: 6px;
   }
 
   .compare-button {
@@ -812,18 +1156,30 @@
     user-select: none;
     margin-top: 2rem;
     margin-bottom: 1rem;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid #e5e7eb;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    background-color: #f3f4f6;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+    transition: background-color 0.2s ease;
+  }
+
+  .section-header:hover {
+    background-color: #e5e7eb;
   }
 
   .section-header h2 {
     margin: 0;
     flex-grow: 1;
+    font-size: 1.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
   }
 
   .section-header .toggle-icon {
     font-size: 1.2rem;
-    transition: transform 0.2s ease;
+    transition: transform 0.3s ease;
+    color: #4b5563;
   }
 
   .section-header .toggle-icon.collapsed {
@@ -832,9 +1188,14 @@
 
   .section-content {
     overflow: hidden;
-    transition: max-height 0.3s ease, opacity 0.3s ease;
+    transition: max-height 0.4s ease, opacity 0.3s ease, margin 0.3s ease;
     max-height: 2000px;
     opacity: 1;
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    margin-bottom: 1.5rem;
+    padding: 1.5rem;
   }
 
   .section-content.collapsed {
@@ -842,25 +1203,35 @@
     opacity: 0;
     margin: 0;
     padding: 0;
+    box-shadow: none;
   }
 
   .nav-back {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 2rem;
+    margin-bottom: 1.5rem;
+    background-color: #f9fafb;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   }
+
   .nav-back button {
-    padding: 0.6rem 1.2rem;
+    padding: 0.5rem 1rem;
     font-weight: bold;
     border: none;
-    border-radius: 8px;
+    border-radius: 6px;
     cursor: pointer;
-    transition: background-color 0.2s;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
   }
 
   .nav-back button:hover {
     background-color: #e5e7eb;
+    transform: translateY(-1px);
   }
 
   .nav-back .add-repo {
@@ -871,52 +1242,191 @@
   .nav-back .add-repo:hover {
     background-color: #374151;
   }
+
+  .repo-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .repo-header h1 {
+    margin: 0;
+    flex-grow: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .repo-stats {
+    display: flex;
+    gap: 1.5rem;
+  }
+
+  .stat-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    position: relative;
+    cursor: help;
+    padding: 0.5rem 0.75rem;
+    background-color: #f9fafb;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+  }
+
+  .stat-item:hover {
+    background-color: #f3f4f6;
+    transform: translateY(-2px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+
+  .stat-value {
+    font-weight: bold;
+    font-size: 1.1rem;
+  }
 </style>
 
 <div class="container">
   <div class="nav-back">
-    <button on:click={() => (window.location.hash = '')}>&larr; Back to Home</button>
-    <button class="add-repo" on:click={() => (window.location.hash = '#/?tab=add')}>➕ Add Repo</button>
+    <button on:click={() => (window.location.hash = '')}>
+      <span>&larr;</span> Back to Home
+    </button>
+    <button class="add-repo" on:click={() => (window.location.hash = '#/?tab=add')}>
+      <span>+</span> Add Repo
+    </button>
   </div>
   {#if loading}
-    <h1>Loading repository data…</h1>
+    <div style="text-align: center; padding: 3rem 0;">
+      <h1>Loading repository data…</h1>
+    </div>
   {:else if error}
     <p class="error">{error}</p>
   {:else if repo}
-    <h1>📦 {repo.name}</h1>
-
-    <table>
-      <tbody>
-        <tr><th>Full ID</th><td>{repo.id}</td></tr>
-        <tr><th>Description</th><td>{repo.description}</td></tr>
-        <tr><th>License</th><td>{repo.license}</td></tr>
-        <tr><th>Stars</th><td>{repo.stars}</td></tr>
-        <tr><th>Forks</th><td>{repo.forks}</td></tr>
-        <tr><th>Issues</th><td>{repo.issues}</td></tr>
-        <tr><th>Contributors</th><td>{repo.contributors}</td></tr>
-        <tr><th>Total Commits</th><td>{repo.commits}</td></tr>
-        <tr><th>Last Commit</th><td>{repo.last_commit}</td></tr>
-        <tr><th>Created At</th><td>{repo.created_at}</td></tr>
-        <tr><th>Updated At</th><td>{repo.updated_at}</td></tr>
-        <tr><th>Last Synced</th><td>{repo.last_synced}</td></tr>
-        <tr><th>Topics</th><td>{repo.topics}</td></tr>
-        <tr>
-          <th>Tags</th>
-          <td><input type="text" bind:value={tags} placeholder="Comma-separated tags" /></td>
-        </tr>
-
-        <tr><th>GitHub</th><td><a href={repo.url} target="_blank">{repo.url}</a></td></tr>
-      </tbody>
-    </table>
-
-
-    <div class="action-buttons">
-      <button class="delete-button" on:click={confirmDelete}>🗑️ Delete Repository</button>
-      <button class="update-button" on:click={updateRepository}>🔄 Update from GitHub</button>
-      <button on:click={saveMetadata}>💾 Save Tags</button>
-      {#if saveStatus}<p class="save-status">{saveStatus}</p>{/if}
+    <div class="repo-header">
+      <h1>📦 {repo.name}</h1>
+      <div class="repo-stats">
+        <div class="stat-item" title="Total Commits">
+          <span>✍️</span>
+          <span class="stat-value">{repo.commits}</span>
+        </div>
+        <div class="stat-item" title="Open Issues">
+          <span>🐞</span>
+          <span class="stat-value">{repo.issues}</span>
+        </div>
+        <div class="stat-item" title="Contributors">
+          <span>🧑‍🤝‍🧑</span>
+          <span class="stat-value">{repo.contributors}</span>
+        </div>
+        <div class="stat-item" title="GitHub Forks">
+          <span>🍴</span>
+          <span class="stat-value">{repo.forks}</span>
+        </div>
+        <div class="stat-item" title="GitHub Stars">
+          <span>⭐</span>
+          <span class="stat-value">{repo.stars}</span>
+        </div>
+      </div>
     </div>
-    {#if updateStatus}<p class="update-status">{updateStatus}</p>{/if}
+
+    <div class="repo-grid">
+      <div class="info-card">
+        <h3>Repository Information</h3>
+        <div class="info-item">
+          <div class="info-label">Description</div>
+          <div class="info-value">{repo.description}</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">GitHub</div>
+          <div class="info-value">
+            <a href={repo.url} target="_blank">{repo.url}</a>
+          </div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">License</div>
+          <div class="info-value">{repo.license}</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Topics</div>
+          <div class="info-value">
+            {#if repo.topics}
+              <div class="topic-pills">
+                {#each repo.topics.split(',').filter(topic => topic.trim()) as topic}
+                  <span class="topic-pill">{topic.trim()}</span>
+                {/each}
+              </div>
+            {:else}
+              <span class="no-topics">No topics</span>
+            {/if}
+          </div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Last Commit</div>
+          <div class="info-value">{formatDate(repo.last_commit)}</div>
+        </div>
+      </div>
+
+      <div class="info-card">
+        <h3>Metadata & Actions</h3>
+        <div class="info-item">
+          <div class="info-label">Full ID</div>
+          <div class="info-value" style="word-break: break-all; font-size: 0.9rem;">{repo.id}</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Created At</div>
+          <div class="info-value">{formatDate(repo.created_at)}</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Updated At</div>
+          <div class="info-value">{formatRelativeTime(repo.updated_at)}</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Last Synced</div>
+          <div class="info-value">{formatRelativeTime(repo.last_synced)}</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Total Comments</div>
+          <div class="info-value">{repo.comments ? repo.comments.length : 0}</div>
+        </div>
+        <div class="info-item">
+          <div class="info-label">Total Versions</div>
+          <div class="info-value">{repo.versions ? repo.versions.length : 0}</div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="tags-actions-container">
+      <div class="tags-container">
+        <label for="tags-input">Repository Tags:</label>
+        <input id="tags-input" type="text" bind:value={tags} placeholder="Comma-separated tags (e.g., javascript, web, tool)" />
+      </div>
+
+      <div class="action-buttons">
+        <button class="save-button" on:click={saveMetadata}>
+          <span>💾</span> Save Tags
+        </button>
+        <button class="update-button" on:click={updateRepository}>
+          <span>🔄</span> Update from GitHub
+        </button>
+        <button class="delete-button" on:click={confirmDelete}>
+          <span>🗑️</span> Delete Repository
+        </button>
+      </div>
+
+      {#if saveStatus}
+        <div class="status-message {saveStatus.includes('✅') ? 'status-success' : saveStatus.includes('❌') ? 'status-error' : 'status-loading'}">
+          {saveStatus}
+        </div>
+      {/if}
+
+      {#if updateStatus}
+        <div class="status-message {updateStatus.includes('✅') ? 'status-success' : updateStatus.includes('❌') ? 'status-error' : 'status-loading'}">
+          {updateStatus}
+        </div>
+      {/if}
+    </div>
 
     {#if showDeleteConfirm}
       <div class="modal-overlay">
@@ -979,7 +1489,7 @@
             <div class="comment">
               <div class="comment-header">
                 <span class="comment-author">{comment.author}</span>
-                <span class="comment-date">{new Date(comment.created_at).toLocaleString()}</span>
+                <span class="comment-date">{formatRelativeTime(comment.created_at)}</span>
               </div>
               <div class="comment-content">{comment.comment}</div>
             </div>
@@ -1000,40 +1510,35 @@
       <!-- Version form -->
       <div class="version-form">
         <div class="version-form-row">
-          <div class="field">
-            <label for="version-number">Version Number:</label>
-            <input
-              type="text"
-              id="version-number"
-              bind:value={newVersion}
-              placeholder="e.g., 1.0.0"
-            />
-          </div>
-          <div class="field">
-            <label for="release-date">Release Date (optional):</label>
-            <input
-              type="date"
-              id="release-date"
-              bind:value={versionReleaseDate}
-            />
-          </div>
-        </div>
-
-        <label for="version-description">Description (optional):</label>
-        <textarea
-          id="version-description"
-          bind:value={versionDescription}
-          placeholder="What's new in this version?"
-        ></textarea>
-
-        <div style="text-align: right;">
-          <button on:click={addVersion} disabled={addingVersion}>
-            {addingVersion ? 'Adding...' : '📈 Add Version'}
+          <input
+            type="text"
+            id="version-number"
+            bind:value={newVersion}
+            placeholder="Version number"
+            title="Version number (e.g., v2023.5.15)"
+          />
+          <input
+            type="date"
+            id="release-date"
+            bind:value={versionReleaseDate}
+            title="Release date"
+          />
+          <input
+            type="text"
+            id="version-description"
+            bind:value={versionDescription}
+            placeholder="Description (optional)"
+            title="Brief description of this version"
+          />
+          <button class="add-version-button" on:click={addVersion} disabled={addingVersion}>
+            {addingVersion ? 'Adding...' : '📈 Add'}
           </button>
         </div>
 
         {#if versionStatus}
-          <p class="version-status">{versionStatus}</p>
+          <div class="status-message {versionStatus.includes('✅') ? 'status-success' : versionStatus.includes('❌') ? 'status-error' : 'status-loading'}">
+            {versionStatus}
+          </div>
         {/if}
       </div>
 
@@ -1182,9 +1687,9 @@
               <div class="version-header">
                 <span class="version-number">{version.version_number}</span>
                 {#if version.release_date}
-                  <span class="version-date">Released: {new Date(version.release_date).toLocaleDateString()}</span>
+                  <span class="version-date">Released: {formatDate(version.release_date)}</span>
                 {:else}
-                  <span class="version-date">Added: {new Date(version.created_at).toLocaleString()}</span>
+                  <span class="version-date">Added: {formatRelativeTime(version.created_at)}</span>
                 {/if}
               </div>
               {#if version.description}
@@ -1209,18 +1714,18 @@
         <table>
           <thead>
             <tr>
+              <th>Date</th>
               <th>SHA</th>
               <th>Author</th>
-              <th>Date</th>
               <th>Message</th>
             </tr>
           </thead>
           <tbody>
             {#each repo.recent_commits as commit}
               <tr>
+                <td>{formatDate(commit.date)}</td>
                 <td>{commit.sha}</td>
                 <td>{commit.author}</td>
-                <td>{commit.date}</td>
                 <td>{commit.message}</td>
               </tr>
             {/each}
