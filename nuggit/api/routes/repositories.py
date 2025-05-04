@@ -61,9 +61,11 @@ def retry_github(
         except GithubException as e:
             last_exc = e
             if e.status == 403 and attempt < retries - 1:
-                wait = 2 ** attempt
-                logging.warning(f"Rate limit, retrying in {wait}s…")
-                time.sleep(wait)
+                # Only wait if we have retries left
+                if retries > 0:
+                    wait = 0.5  # Use a minimal wait time
+                    logging.warning(f"Rate limit, retrying immediately...")
+                    time.sleep(wait)
                 continue
             if e.status == 404:
                 raise HTTPException(404, f"{owner}/{name} not found on GitHub")
@@ -314,12 +316,13 @@ def batch_import(batch: BatchRepositoryInput):
                 raise ValueError("Invalid format, expected 'owner/name' or GitHub URL")
 
             existing = get_repository(repo_id)
+            # Use 0 retries to avoid unnecessary delays
             repo_info = retry_github(
                 get_repo_info,
                 owner,
                 name,
                 batch.token,
-                1,
+                0,
                 preserve={"tags": existing.get("tags"), "notes": existing.get("notes")} if existing else None,
             )
             insert_or_update_repo(repo_info)

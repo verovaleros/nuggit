@@ -126,16 +126,19 @@ async def fetch_recent_commits(
     gh_client: Github,
     repo_id: str,
     limit: int = 10,
-    max_retries: int = 2
+    max_retries: int = 2,
+    offline_mode: bool = False
 ) -> List[CommitSchema]:
     """
     Fetch recent commits for a GitHub repository using a thread pool.
+    In offline mode, returns an empty list without attempting to contact GitHub.
 
     Args:
         gh_client (Github): Authenticated GitHub client instance.
         repo_id (str): Repository identifier (owner/name).
         limit (int, optional): Maximum number of commits to fetch. Defaults to 10.
         max_retries (int, optional): Number of retry attempts on failure. Defaults to 2.
+        offline_mode (bool, optional): If True, skip GitHub API calls. Defaults to False.
 
     Returns:
         List[CommitSchema]: List of commits as Pydantic models.
@@ -143,17 +146,32 @@ async def fetch_recent_commits(
     Raises:
         None: All exceptions are caught and logged; returns empty list on error.
     """
+    # If in offline mode, don't try to contact GitHub
+    if offline_mode:
+        logger.info(f"Offline mode: skipping GitHub commit fetch for {repo_id}")
+        return []
+
+    # Set a short timeout to avoid long waits
+    timeout = 3  # 3 seconds timeout
+
     try:
         loop = asyncio.get_event_loop()
-        commits = await loop.run_in_executor(
-            None,
-            lambda: get_recent_commits(
-                gh_client.get_repo(repo_id),
-                limit=limit,
-                max_retries=max_retries
-            )
+        # Use asyncio.wait_for to add a timeout
+        commits = await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: get_recent_commits(
+                    gh_client.get_repo(repo_id),
+                    limit=limit,
+                    max_retries=0  # No retries to avoid delays
+                )
+            ),
+            timeout=timeout
         )
         return [CommitSchema(**c) for c in commits]
+    except asyncio.TimeoutError:
+        logger.warning(f"Timeout fetching commits for {repo_id} - falling back to offline mode")
+        return []
     except GithubException as e:
         logger.error(f"GitHub error fetching commits for {repo_id}: {e}")
     except Exception as e:
@@ -193,16 +211,29 @@ async def get_repository_detail(repo_id: str):
             detail="Repository not found"
         )
 
+    # Check if we can connect to GitHub
+    offline_mode = False
+    try:
+        # Try to make a quick connection to GitHub to check if we're online
+        import socket
+        socket.create_connection(("api.github.com", 443), timeout=1)
+    except (socket.timeout, socket.error):
+        # If we can't connect, assume we're offline
+        logger.warning("Cannot connect to GitHub - operating in offline mode")
+        offline_mode = True
+
     gh_client = get_gh_client()
 
-    # Fire off all I/O in parallel
-    commits_task = asyncio.create_task(fetch_recent_commits(gh_client, repo_id))
+    # Only fetch comments and versions initially, not commits
     comments_task = asyncio.create_task(db_get_comments(repo_id))
     versions_task = asyncio.create_task(db_get_versions(repo_id))
 
-    recent_commits, comments, versions = await asyncio.gather(
-        commits_task, comments_task, versions_task, return_exceptions=True
+    comments, versions = await asyncio.gather(
+        comments_task, versions_task, return_exceptions=True
     )
+
+    # Initialize empty commits list - will be fetched separately when needed
+    recent_commits = []
 
     if isinstance(comments, Exception):
         logger.error(f"Error fetching comments for {repo_id}: {comments}")
@@ -356,4 +387,58 @@ async def get_repository_comments(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get comments"
+        )
+
+
+@router.get(
+    "/{repo_id:path}/commits/",
+    response_model=List[CommitSchema],
+    summary="Get recent commits for a repository",
+)
+async def get_repository_commits(
+    repo_id: str,
+    limit: int = Query(10, description="Maximum number of commits to return"),
+):
+    """
+    Get recent commits for a repository.
+
+    Args:
+        repo_id (str): The ID of the repository.
+        limit (int, optional): Maximum number of commits to return. Defaults to 10.
+
+    Returns:
+        List[CommitSchema]: A list of recent commits.
+
+    Raises:
+        HTTPException (404): If the repository is not found.
+        HTTPException (500): If commits retrieval fails.
+    """
+    repo = await db_get_repository(repo_id)
+    if not repo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Repository not found"
+        )
+
+    # Check if we can connect to GitHub
+    offline_mode = False
+    try:
+        # Try to make a quick connection to GitHub to check if we're online
+        import socket
+        socket.create_connection(("api.github.com", 443), timeout=1)
+    except (socket.timeout, socket.error):
+        # If we can't connect, assume we're offline
+        logger.warning("Cannot connect to GitHub - operating in offline mode")
+        offline_mode = True
+
+    gh_client = get_gh_client()
+
+    try:
+        commits = await fetch_recent_commits(gh_client, repo_id, limit=limit, offline_mode=offline_mode)
+        return commits
+    except Exception as e:
+        logger.error(f"Error retrieving commits for {repo_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get commits"
         )

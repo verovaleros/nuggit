@@ -1,8 +1,14 @@
 <script>
   import { onMount } from 'svelte';
+  import TagInput from '../components/TagInput.svelte';
 
   let repoId = null;
   let repo = null;
+
+  // Initialize repo with empty recent_commits array to avoid errors
+  $: if (repo && !repo.recent_commits) {
+    repo.recent_commits = [];
+  }
   let loading = true;
   let error = null;
 
@@ -60,30 +66,66 @@
       // Encode the repository ID for the URL
       const encodedRepoId = encodeURIComponent(repoId);
 
-      // Fetch repository details
-      const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`);
+      // Set a timeout for the fetch operation to handle offline mode gracefully
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
 
-      if (!res.ok) {
-        throw new Error(await res.text());
-      }
-
-      repo = await res.json();
-      tags = repo.tags || '';
-      notes = repo.notes || '';
-
-      // Fetch versions using the new API endpoint
       try {
-        const versionsRes = await fetch(`http://localhost:8001/api/get-versions?repo_id=${encodedRepoId}`);
+        // Fetch repository details
+        const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`, {
+          signal: controller.signal
+        });
 
-        if (versionsRes.ok) {
-          const versions = await versionsRes.json();
-          repo.versions = versions;
-          console.log('Versions fetched successfully:', versions);
-        } else {
-          console.error('Failed to fetch versions:', await versionsRes.text());
+        clearTimeout(timeoutId); // Clear the timeout if fetch completes
+
+        if (!res.ok) {
+          throw new Error(await res.text());
         }
-      } catch (versionsErr) {
-        console.error('Error fetching versions:', versionsErr);
+
+        repo = await res.json();
+        tags = repo.tags ? repo.tags.join(',') : '';
+        notes = repo.notes || '';
+
+        // Fetch versions using the new API endpoint
+        try {
+          const versionsRes = await fetch(`http://localhost:8001/api/get-versions?repo_id=${encodedRepoId}`);
+
+          if (versionsRes.ok) {
+            const versions = await versionsRes.json();
+            repo.versions = versions;
+            console.log('Versions fetched successfully:', versions);
+          } else {
+            console.error('Failed to fetch versions:', await versionsRes.text());
+          }
+        } catch (versionsErr) {
+          console.error('Error fetching versions:', versionsErr);
+        }
+      } catch (fetchErr) {
+        if (fetchErr.name === 'AbortError') {
+          error = 'Connection timed out. Loading repository from local database.';
+          console.warn('Repository fetch timed out - trying to load from local database');
+
+          // Try again with a longer timeout - this will use the offline mode in the backend
+          try {
+            const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`, {
+              timeout: 10000 // Longer timeout for offline mode
+            });
+
+            if (!res.ok) {
+              throw new Error(await res.text());
+            }
+
+            repo = await res.json();
+            tags = repo.tags ? repo.tags.join(',') : '';
+            notes = repo.notes || '';
+            error = null; // Clear the error if we successfully loaded from DB
+          } catch (offlineErr) {
+            error = `Failed to load repository: ${offlineErr.message}`;
+            console.error('Failed to load repository in offline mode:', offlineErr);
+          }
+        } else {
+          throw fetchErr;
+        }
       }
     } catch (err) {
       error = `Failed to fetch repository details: ${err.message}`;
@@ -130,20 +172,34 @@
       // Encode the repository ID for the URL
       const encodedRepoId = encodeURIComponent(repoId);
 
-      const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`, {
-        method: 'PUT'
-      });
+      // Set a timeout for the fetch operation
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
 
-      if (!res.ok) {
-        throw new Error(await res.text());
+      try {
+        const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`, {
+          method: 'PUT',
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId); // Clear the timeout if fetch completes
+
+        if (!res.ok) {
+          throw new Error(await res.text());
+        }
+
+        // Parse the response from the update endpoint
+        const updateData = await res.json();
+        console.log('Update response:', updateData);
+      } catch (fetchErr) {
+        if (fetchErr.name === 'AbortError') {
+          console.warn('Update request timed out - continuing with local data');
+        } else {
+          throw fetchErr;
+        }
       }
 
-      // Parse the response from the update endpoint
-      const updateData = await res.json();
-      console.log('Update response:', updateData);
-
-      // After successful update, fetch the repository details again to get the latest data
-      // including comments and recent commits
+      // After update attempt (successful or not), fetch the repository details again
       try {
         // Encode the repository ID for the URL
         const encodedRepoId = encodeURIComponent(repoId);
@@ -178,10 +234,10 @@
 
         updateStatus = '✅ Repository updated!';
 
-        // Clear the status after 3 seconds
+        // Clear the status after 1 second
         setTimeout(() => {
           updateStatus = '';
-        }, 3000);
+        }, 1000);
       } catch (detailErr) {
         console.error('Error fetching updated repository details:', detailErr);
         updateStatus = '✅ Repository updated, but failed to refresh details.';
@@ -227,8 +283,99 @@
     commentsCollapsed = !commentsCollapsed;
   }
 
-  function toggleCommits() {
+  // State for commit loading
+  let loadingCommits = false;
+  let commitsError = null;
+
+  async function toggleCommits() {
     commitsCollapsed = !commitsCollapsed;
+
+    // If we're expanding the commits section and there are no commits yet, fetch them
+    if (!commitsCollapsed && (!repo.recent_commits || repo.recent_commits.length === 0)) {
+      await fetchCommits();
+    }
+  }
+
+  async function checkRepositoryExists(repoId) {
+    try {
+      const encodedRepoId = encodeURIComponent(repoId);
+      const checkUrl = `http://localhost:8001/repositories/check/${encodedRepoId}`;
+      console.log('Checking if repository exists:', checkUrl);
+
+      const res = await fetch(checkUrl);
+      if (!res.ok) {
+        console.error('Error checking repository:', await res.text());
+        return false;
+      }
+
+      const data = await res.json();
+      return data.exists;
+    } catch (err) {
+      console.error('Error checking if repository exists:', err);
+      return false;
+    }
+  }
+
+  async function fetchCommits() {
+    if (loadingCommits) return; // Prevent multiple simultaneous requests
+
+    loadingCommits = true;
+    commitsError = null;
+
+    try {
+      // Make sure repoId is properly defined
+      if (!repoId) {
+        throw new Error("Repository ID is missing");
+      }
+
+      console.log('Fetching commits for repository:', repoId);
+
+      // First check if the repository exists in the database
+      const exists = await checkRepositoryExists(repoId);
+      if (!exists) {
+        throw new Error("Repository not found in database");
+      }
+
+      const encodedRepoId = encodeURIComponent(repoId);
+
+      // Set a timeout for the fetch operation
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+      try {
+        // Log the URL we're fetching from - make sure to include trailing slash
+        const url = `http://localhost:8001/repositories/${encodedRepoId}/commits/`;
+        console.log('Fetching commits from URL:', url);
+
+        const res = await fetch(url, {
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId); // Clear the timeout if fetch completes
+
+        if (!res.ok) {
+          const errorText = await res.text();
+          console.error('Error response from commits API:', errorText);
+          throw new Error(errorText);
+        }
+
+        const commits = await res.json();
+        repo.recent_commits = commits;
+        console.log('Commits fetched successfully:', commits);
+      } catch (fetchErr) {
+        if (fetchErr.name === 'AbortError') {
+          commitsError = 'Failed to load commits: Connection timed out';
+          console.warn('Commits fetch timed out');
+        } else {
+          throw fetchErr;
+        }
+      }
+    } catch (err) {
+      commitsError = `Failed to load commits: ${err.message}`;
+      console.error('Error fetching commits:', err);
+    } finally {
+      loadingCommits = false;
+    }
   }
 
   function toggleVersions() {
@@ -727,12 +874,7 @@
     color: #374151;
   }
 
-  .tags-container input {
-    padding: 0.75rem;
-    border: 1px solid #d1d5db;
-    border-radius: 6px;
-    font-size: 1rem;
-  }
+  /* Tag styles moved to TagInput.svelte component */
 
   .action-buttons {
     display: flex;
@@ -1321,6 +1463,32 @@
     padding: 2px 6px;
     border-radius: 4px;
   }
+
+  .loading-commits {
+    padding: 1rem;
+    text-align: center;
+    color: #4b5563;
+  }
+
+  .commits-error {
+    padding: 1rem;
+    text-align: center;
+    color: #ef4444;
+  }
+
+  .retry-button {
+    background-color: #f3f4f6;
+    border: 1px solid #d1d5db;
+    border-radius: 4px;
+    padding: 0.5rem 1rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .retry-button:hover {
+    background-color: #e5e7eb;
+  }
 </style>
 
 <div class="container">
@@ -1420,11 +1588,11 @@
         </div>
         <div class="info-item">
           <div class="info-label">Updated At</div>
-          <div class="info-value">{formatDate(repo.updated_at)}</div>
+          <div class="info-value">{formatDateWithDaysAgo(repo.updated_at)}</div>
         </div>
         <div class="info-item">
           <div class="info-label">Last Synced</div>
-          <div class="info-value">{formatDate(repo.last_synced)}</div>
+          <div class="info-value">{formatDateWithDaysAgo(repo.last_synced)}</div>
         </div>
         <div class="info-item">
           <div class="info-label">Total Comments</div>
@@ -1441,7 +1609,7 @@
     <div class="tags-actions-container">
       <div class="tags-container">
         <label for="tags-input">Repository Tags:</label>
-        <input id="tags-input" type="text" bind:value={tags} placeholder="Comma-separated tags (e.g., javascript, web, tool)" />
+        <TagInput bind:tags on:change={event => tags = event.detail.tags} />
       </div>
 
       <div class="action-buttons">
@@ -1751,7 +1919,18 @@
     </div>
 
     <div class="section-content {commitsCollapsed ? 'collapsed' : ''}">
-      {#if repo.recent_commits.length > 0}
+      {#if loadingCommits}
+        <div class="loading-commits">
+          <p style="text-align: center;">Loading commits from GitHub...</p>
+        </div>
+      {:else if commitsError}
+        <div class="commits-error">
+          <p style="text-align: center;">{commitsError}</p>
+          <div style="text-align: center; margin-top: 1rem;">
+            <button on:click={fetchCommits} class="retry-button">Retry</button>
+          </div>
+        </div>
+      {:else if repo.recent_commits && repo.recent_commits.length > 0}
         <table>
           <thead>
             <tr>

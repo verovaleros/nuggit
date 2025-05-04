@@ -19,7 +19,7 @@
 
   let allRepos = [];
   let filteredRepos = [];
-  let pageSize = 10; // Smaller page size to make pagination more visible
+  let pageSize = 5; // Smaller page size to make pagination more visible
   let currentDisplayCount = pageSize;
   let searchTerm = '';
 
@@ -212,6 +212,32 @@
     } catch (error) {
       console.error('Error formatting date:', error);
       return dateString; // Return the original string if there's an error
+    }
+  }
+
+  // Format date with days ago
+  function formatDateWithDaysAgo(dateString) {
+    if (!dateString) return 'N/A';
+
+    try {
+      const date = new Date(dateString);
+
+      // Check if date is valid
+      if (isNaN(date.getTime())) return dateString;
+
+      // Format the date
+      const formattedDate = formatDate(dateString);
+
+      // Calculate days ago
+      const now = new Date();
+      const diffTime = Math.abs(now - date);
+      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+      // Return formatted string
+      return `${formattedDate} (${diffDays} ${diffDays === 1 ? 'day' : 'days'} ago)`;
+    } catch (error) {
+      console.error('Error formatting date with days ago:', error);
+      return dateString;
     }
   }
 
@@ -531,7 +557,8 @@
   }
 
   .tag-btn {
-    background-color: #f3f4f6;
+    background-color: #dbeafe; /* Light blue background */
+    color: #1e40af; /* Dark blue text for contrast */
     border: none;
     border-radius: 6px;
     padding: 0.4rem 0.8rem;
@@ -542,7 +569,7 @@
   }
 
   .tag-btn:hover {
-    background-color: #d1d5db;
+    background-color: #bfdbfe; /* Slightly darker blue on hover */
   }
 
   .stat-block {
@@ -771,7 +798,7 @@
                 <td>{repo.description}</td>
                 <td>{repo.license}</td>
                 <td>{repo.stars}</td>
-                <td>{formatDate(repo.last_synced)}</td>
+                <td>{formatDateWithDaysAgo(repo.last_synced)}</td>
               </tr>
             {/each}
           </tbody>

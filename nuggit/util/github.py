@@ -86,9 +86,6 @@ def get_repo_topics(repo):
 
 
 def get_repo_info(repo_owner, repo_name, token=None):
-    # Use the global token if none is provided
-    if token is None:
-        token = GITHUB_TOKEN
     """
     Get information about a GitHub repository.
     Args:
@@ -98,12 +95,20 @@ def get_repo_info(repo_owner, repo_name, token=None):
     Returns:
         dict: A dictionary containing information about the repository.
     """
-    # Authenticate with GitHub
-    gh = Github(token, timeout=10) if token else Github(timeout=10)
+    # Use the global token if none is provided
+    if token is None:
+        token = GITHUB_TOKEN
 
-    rate = gh.get_rate_limit().core
-    print(f"🔑 Authenticated? {token is not None}")
-    print(f"📊 GitHub Rate Limit: {rate.remaining}/{rate.limit}, reset at {rate.reset}")
+    # Authenticate with GitHub with a shorter timeout
+    gh = Github(token, timeout=3) if token else Github(timeout=3)
+
+    try:
+        rate = gh.get_rate_limit().core
+        print(f"🔑 Authenticated? {token is not None}")
+        print(f"📊 GitHub Rate Limit: {rate.remaining}/{rate.limit}, reset at {rate.reset}")
+    except Exception as e:
+        print(f"⚠️ Could not check GitHub rate limit: {e}")
+        # Continue anyway - we'll catch errors when trying to get the repo
     try:
         repo = gh.get_repo(f"{repo_owner}/{repo_name}")
 
@@ -243,9 +248,9 @@ def get_recent_commits(repo, limit=5, branch=None, max_retries=3):
 
         except GithubException as e:
             if e.status == 403 and attempt < max_retries - 1:
-                # This might be a rate limit issue, wait and retry
+                # This might be a rate limit issue, retry with minimal delay
                 logging.warning(f"GitHub API rate limit hit, retrying ({attempt+1}/{max_retries}): {e}")
-                time.sleep(2 ** attempt)  # Exponential backoff
+                time.sleep(0.1)  # Minimal delay
             elif e.status == 404:
                 # Repository or branch not found
                 logging.error(f"Repository or branch not found: {e}")
