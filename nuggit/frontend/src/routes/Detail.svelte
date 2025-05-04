@@ -317,12 +317,39 @@
         month: 'short',
         day: 'numeric',
         hour: '2-digit',
-        minute: '2-digit'
+        minute: '2-digit',
+        timeZoneName: 'short'
       };
 
       return date.toLocaleDateString(undefined, options);
     } catch (error) {
       console.error('Error formatting date:', error);
+      return dateString;
+    }
+  }
+
+  // Format date with days ago
+  function formatDateWithDaysAgo(dateString) {
+    if (!dateString) return 'N/A';
+
+    try {
+      const date = new Date(dateString);
+
+      // Check if date is valid
+      if (isNaN(date.getTime())) return dateString;
+
+      // Format the date
+      const formattedDate = formatDate(dateString);
+
+      // Calculate days ago
+      const now = new Date();
+      const diffTime = Math.abs(now - date);
+      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+
+      // Return formatted string
+      return `${formattedDate} (${diffDays} ${diffDays === 1 ? 'day' : 'days'} ago)`;
+    } catch (error) {
+      console.error('Error formatting date with days ago:', error);
       return dateString;
     }
   }
@@ -1286,6 +1313,14 @@
     font-weight: bold;
     font-size: 1.1rem;
   }
+
+  .no-license {
+    color: #e65100;
+    font-weight: bold;
+    background-color: #fff3e0;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
 </style>
 
 <div class="container">
@@ -1345,7 +1380,13 @@
         </div>
         <div class="info-item">
           <div class="info-label">License</div>
-          <div class="info-value">{repo.license}</div>
+          <div class="info-value">
+            {#if repo.license === 'No license'}
+              <span class="no-license">⚠️ {repo.license}</span>
+            {:else}
+              {repo.license}
+            {/if}
+          </div>
         </div>
         <div class="info-item">
           <div class="info-label">Topics</div>
@@ -1363,7 +1404,7 @@
         </div>
         <div class="info-item">
           <div class="info-label">Last Commit</div>
-          <div class="info-value">{formatDate(repo.last_commit)}</div>
+          <div class="info-value">{formatDateWithDaysAgo(repo.last_commit)}</div>
         </div>
       </div>
 
@@ -1379,11 +1420,11 @@
         </div>
         <div class="info-item">
           <div class="info-label">Updated At</div>
-          <div class="info-value">{formatRelativeTime(repo.updated_at)}</div>
+          <div class="info-value">{formatDate(repo.updated_at)}</div>
         </div>
         <div class="info-item">
           <div class="info-label">Last Synced</div>
-          <div class="info-value">{formatRelativeTime(repo.last_synced)}</div>
+          <div class="info-value">{formatDate(repo.last_synced)}</div>
         </div>
         <div class="info-item">
           <div class="info-label">Total Comments</div>
@@ -1723,7 +1764,7 @@
           <tbody>
             {#each repo.recent_commits as commit}
               <tr>
-                <td>{formatDate(commit.date)}</td>
+                <td>{formatDateWithDaysAgo(commit.date)}</td>
                 <td>{commit.sha}</td>
                 <td>{commit.author}</td>
                 <td>{commit.message}</td>

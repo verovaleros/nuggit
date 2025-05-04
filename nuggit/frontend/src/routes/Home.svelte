@@ -230,7 +230,7 @@
       // Update the status to show we're processing this repository
       processingRepos = processingRepos.map((repo, index) =>
         index === i
-          ? { ...repo, status: 'processing', message: 'Processing...' }
+          ? { ...repo, status: 'processing', message: '🔄' }
           : repo
       );
 
@@ -263,7 +263,7 @@
               ? {
                   ...repo,
                   status: 'success',
-                  message: 'Successfully added',
+                  message: '✅',
                   name: successfulRepo.name,
                   id: successfulRepo.id // Update with the canonical ID
                 }
@@ -288,7 +288,7 @@
         // Update the processing status for this repository
         processingRepos = processingRepos.map((repo, index) =>
           index === i
-            ? { ...repo, status: 'error', message: err.message }
+            ? { ...repo, status: 'error', message: '❌', errorDetails: err.message }
             : repo
         );
 
@@ -328,7 +328,7 @@
     processingRepos = repos.map(id => ({
       id,
       status: 'pending', // pending, processing, success, error
-      message: 'Waiting to process...',
+      message: '⏳',
       name: ''
     }));
 
@@ -376,7 +376,8 @@
       processingRepos = processingRepos.map(repo => ({
         ...repo,
         status: 'error',
-        message: err.message
+        message: '❌',
+        errorDetails: err.message
       }));
     } finally {
       isAdding = false;
@@ -845,13 +846,13 @@ username3/repo3"
                 <div class="repo-id">{repo.id}</div>
                 <div class="repo-status">
                   {#if repo.status === 'pending'}
-                    ⏳ {repo.message}
+                    ⏳
                   {:else if repo.status === 'processing'}
-                    🔄 {repo.message}
+                    🔄
                   {:else if repo.status === 'success'}
-                    ✅ {repo.message} {repo.name ? `- ${repo.name}` : ''}
+                    {repo.message}
                   {:else if repo.status === 'error'}
-                    ❌ {repo.message}
+                    <span title="{repo.errorDetails}">{repo.message}</span>
                   {/if}
                 </div>
               </div>
