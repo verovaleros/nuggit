@@ -2,37 +2,190 @@ import os
 import re
 import time
 import logging
-import sqlite3
-from os import getenv
-from typing import Optional, Union
-from pydantic import BaseModel, Field, validator
-from fastapi import APIRouter, HTTPException, Body, Query, Depends
-from nuggit.util.db import list_all_repositories, insert_or_update_repo, get_repository, delete_repository as db_delete_repository, update_repository_fields, update_repository_metadata
-from nuggit.util.github import get_repo_info, validate_repo_url
-from github.GithubException import GithubException
+from typing import Optional, List, Callable, Any, Dict, Tuple
 
+from fastapi import APIRouter, HTTPException, Body, Query, Depends
+from pydantic import BaseModel, Field, model_validator, field_validator
+from github import GithubException
+
+from nuggit.util.db import (
+    list_all_repositories,
+    insert_or_update_repo,
+    get_repository,
+    delete_repository as db_delete_repository,
+    update_repository_fields,
+    update_repository_metadata,
+    create_repository_version,
+)
+from nuggit.util.github import get_repo_info, validate_repo_url
 
 router = APIRouter()
-DB_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "nuggit.db"))
 
+# -- Shared Helpers ---------------------------------------------------------
+
+def retry_github(
+    fn: Callable[..., Dict[str, Any]],
+    owner: str,
+    name: str,
+    token: Optional[str],
+    retries: int,
+    preserve: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Call GitHub API with exponential-backoff retry, optionally preserving fields.
+
+    Args:
+        fn: GitHub API function to call (e.g., get_repo_info).
+        owner: Repository owner name.
+        name: Repository name.
+        token: GitHub access token.
+        retries: Number of retry attempts on rate limit.
+        preserve: Optional dict of fields to preserve and merge into result.
+
+    Returns:
+        A dict of repository data with preserved fields if provided.
+
+    Raises:
+        HTTPException: 404 if repository not found.
+        HTTPException: 500 on other GitHub errors.
+    """
+    last_exc: Exception = None
+    for attempt in range(retries):
+        try:
+            data = fn(owner, name, token=token)
+            if not data:
+                raise HTTPException(404, f"{owner}/{name} not found on GitHub")
+            if preserve:
+                data.update({k: preserve.get(k) for k in preserve})
+            return data
+        except GithubException as e:
+            last_exc = e
+            if e.status == 403 and attempt < retries - 1:
+                wait = 2 ** attempt
+                logging.warning(f"Rate limit, retrying in {wait}s…")
+                time.sleep(wait)
+                continue
+            if e.status == 404:
+                raise HTTPException(404, f"{owner}/{name} not found on GitHub")
+            break
+        except Exception as e:
+            last_exc = e
+            logging.error(f"GitHub call failed: {e}")
+            break
+    raise HTTPException(500, f"GitHub error: {last_exc}")
+
+
+def parse_owner_name(id: Optional[str], url: Optional[str]) -> Tuple[str, str]:
+    """
+    Extract owner and repository name from an ID or URL.
+
+    Args:
+        id: Optional string in the format "owner/name".
+        url: Optional GitHub repository URL.
+
+    Returns:
+        A tuple (owner, name).
+
+    Raises:
+        HTTPException: 400 if neither id nor url is provided or invalid.
+    """
+    if id:
+        if not re.match(r'^[\w.-]+/[\w.-]+$', id):
+            raise HTTPException(400, "ID must be 'owner/name'")
+        return id.split('/', 1)
+    if url:
+        res = validate_repo_url(url)
+        if not res:
+            raise HTTPException(400, "Invalid GitHub URL")
+        return res
+    raise HTTPException(400, "Either 'id' or 'url' must be provided")
+
+
+def get_token(token: Optional[str] = None) -> Optional[str]:
+    """
+    Retrieve the GitHub token from the request or environment.
+
+    Args:
+        token: Optional token provided in the request.
+
+    Returns:
+        The GitHub token string, or None if not set.
+    """
+    return token or os.getenv("GITHUB_TOKEN")
+
+# -- Schemas ---------------------------------------------------------------
+
+class RepositoryInput(BaseModel):
+    id: Optional[str] = Field(None, description="Repository identifier in the format 'owner/name'.")
+    url: Optional[str] = Field(None, description="GitHub repository URL.")
+    token: Optional[str] = Field(None, description="GitHub access token to use for this request.")
+
+    @model_validator(mode="after")
+    def check_id_or_url(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Ensure that either 'id' or 'url' is provided.
+
+        Raises:
+            ValueError: If neither field is set.
+        """
+        if not (values.get('id') or values.get('url')):
+            raise ValueError("Either 'id' or 'url' must be provided")
+        return values
+
+
+class RepositoryResponse(BaseModel):
+    message: str = Field(..., description="Status message of the operation.")
+    repository: Dict[str, Any] = Field(..., description="The repository data returned.")
+
+
+class BatchRepositoryInput(BaseModel):
+    repositories: List[str] = Field(..., description="List of repository identifiers ('owner/name').")
+    token: Optional[str] = Field(None, description="GitHub access token to use for batch operations.")
+
+    @field_validator('repositories')
+    def non_empty(cls, v: List[str]) -> List[str]:
+        """
+        Ensure the repositories list is not empty.
+
+        Raises:
+            ValueError: If list is empty.
+        """
+        if not v:
+            raise ValueError("Empty repository list")
+        return v
+
+
+class RepositoryFieldsUpdate(BaseModel):
+    license: Optional[str] = Field(None, description="Repository license identifier.")
+    stars: Optional[int] = Field(None, description="Number of stars to update.")
+    topics: Optional[str] = Field(None, description="Comma-separated list of topics.")
+    commits: Optional[int] = Field(None, description="Total commit count.")
+    tags: Optional[str] = Field(None, description="User-defined tags for the repository.")
+    notes: Optional[str] = Field(None, description="User-defined notes about the repository.")
+
+
+class RepositoryMetadataUpdate(BaseModel):
+    tags: str = Field(..., description="New tags for the repository.")
+    notes: str = Field(..., description="New notes for the repository.")
+
+# -- Routes ----------------------------------------------------------------
 
 @router.get("/", summary="List all repositories")
-def get_repositories():
+def list_repositories():
     """
     List all repositories in the database.
 
     Returns:
-        dict: A dictionary containing a list of all repositories.
+        dict: A mapping with a 'repositories' key containing all records.
 
     Raises:
-        HTTPException: If there is an error fetching the repositories.
+        HTTPException: 500 if retrieval fails.
     """
     try:
-        repos = list_all_repositories()
-        return {"repositories": repos}
+        return {"repositories": list_all_repositories()}
     except Exception as e:
-        logging.error(f"Error listing repositories: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to list repositories: {str(e)}")
+        logging.error(e)
+        raise HTTPException(500, "Could not list repositories")
 
 
 @router.get("/check/{repo_id:path}", summary="Check if a repository exists")
@@ -41,385 +194,196 @@ def check_repository(repo_id: str):
     Check if a repository exists in the database.
 
     Args:
-        repo_id (str): The ID of the repository to check.
+        repo_id (str): Identifier in the format 'owner/name'.
 
     Returns:
-        dict: A dictionary indicating whether the repository exists.
+        dict: Contains 'exists' (bool) and 'repository' data if found.
 
     Raises:
-        HTTPException: If there is an error checking the repository.
+        HTTPException: 500 if an error occurs during lookup.
     """
     try:
         repo = get_repository(repo_id)
-        return {
-            "exists": repo is not None,
-            "repository": repo if repo else None
-        }
+        return {"exists": bool(repo), "repository": repo}
     except Exception as e:
-        logging.error(f"Error checking repository {repo_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to check repository: {str(e)}")
+        logging.error(e)
+        raise HTTPException(500, "Error checking repository")
 
 
-# Define Pydantic models for request validation
-class RepositoryInput(BaseModel):
-    """Model for repository input with validation."""
-    id: Optional[str] = Field(None, description="Repository ID in the format 'owner/name'")
-    url: Optional[str] = Field(None, description="GitHub repository URL")
-    token: Optional[str] = Field(None, description="GitHub API token for authentication")
-
-    @validator('id')
-    def validate_id_format(cls, v):
-        if v and not re.match(r'^[\w.-]+/[\w.-]+$', v):
-            raise ValueError("Repository ID must be in the format 'owner/name'")
-        return v
-
-    @validator('url')
-    def validate_url(cls, v, values):
-        if not v and not values.get('id'):
-            raise ValueError("Either 'id' or 'url' must be provided")
-        if v and not (v.startswith('http://github.com/') or v.startswith('https://github.com/')):
-            raise ValueError("URL must be a valid GitHub repository URL")
-        return v
-
-class RepositoryResponse(BaseModel):
-    """Model for repository response."""
-    message: str
-    repository: dict
-
-
-@router.post("/", summary="Fetch and store repository metadata from GitHub", response_model=RepositoryResponse)
-def add_repository(repo_input: RepositoryInput = Body(...), max_retries: int = Query(3, description="Maximum number of retries for GitHub API calls")):
+@router.post(
+    "/",
+    summary="Fetch and store repository metadata from GitHub",
+    response_model=RepositoryResponse,
+)
+def add_repository(
+    payload: RepositoryInput = Body(...),
+    max_retries: int = Query(3, description="Max retry attempts on rate limit."),
+):
     """
     Fetch and store repository metadata from GitHub.
 
     Args:
-        repo_input (RepositoryInput): The repository information with either ID or URL.
-        max_retries (int, optional): Maximum number of retries for GitHub API calls. Defaults to 3.
+        payload (RepositoryInput): Contains 'id' or 'url' and optional token.
+        max_retries (int): Number of retry attempts on rate limit.
 
     Returns:
-        RepositoryResponse: A message indicating the result of the operation and the repository details.
+        RepositoryResponse: Message and repository data.
 
     Raises:
-        HTTPException: If the repository information is invalid, the repository is not found on GitHub,
-                      or there is an error saving to the database.
+        HTTPException: 400 for validation errors.
+        HTTPException: 404 if repository not found on GitHub.
+        HTTPException: 500 on other GitHub or DB errors.
     """
-    # Extract repository owner and name from either ID or URL
-    owner = None
-    name = None
-
-    if repo_input.id:
-        try:
-            owner, name = repo_input.id.strip().split('/')
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Repository ID must be in the format 'owner/name'")
-    elif repo_input.url:
-        result = validate_repo_url(repo_input.url)
-        if not result:
-            raise HTTPException(status_code=400, detail="Invalid GitHub repository URL")
-        owner, name = result
-    else:
-        raise HTTPException(status_code=400, detail="Either repository ID or URL must be provided")
-
-    # Check if repository already exists
-    existing_repo = get_repository(f"{owner}/{name}")
-
-    # Retry logic for GitHub API rate limits
-    last_exception = None
-    for attempt in range(max_retries):
-        try:
-            # Get repository information from GitHub
-            repo_info = get_repo_info(owner, name, token=repo_input.token)
-            if not repo_info:
-                raise HTTPException(status_code=404, detail="Repository not found on GitHub")
-
-            # Save to DB using centralized logic
-            insert_or_update_repo(repo_info)
-
-            # Return success response with repository details
-            return {
-                "message": f"Repository '{repo_info['id']}' {'updated' if existing_repo else 'added'} successfully.",
-                "repository": repo_info
-            }
-        except GithubException as e:
-            last_exception = e
-            if e.status == 403 and attempt < max_retries - 1:
-                # This might be a rate limit issue, wait and retry
-                logging.warning(f"GitHub API rate limit hit, retrying ({attempt+1}/{max_retries}): {e}")
-                time.sleep(2 ** attempt)  # Exponential backoff
-            elif e.status == 404:
-                # Repository not found
-                raise HTTPException(status_code=404, detail=f"Repository {owner}/{name} not found on GitHub")
-            else:
-                # Other GitHub exceptions
-                break
-        except Exception as e:
-            last_exception = e
-            logging.error(f"Error processing repository {owner}/{name}: {e}")
-            break
-
-    # If we get here, all retries failed or another exception occurred
-    error_message = str(last_exception) if last_exception else "Unknown error"
-    raise HTTPException(status_code=500, detail=f"Failed to process repository: {error_message}")
+    owner, name = parse_owner_name(payload.id, payload.url)
+    existing = get_repository(f"{owner}/{name}")
+    repo_info = retry_github(get_repo_info, owner, name, payload.token, max_retries)
+    insert_or_update_repo(repo_info)
+    action = "updated" if existing else "added"
+    return {
+        "message": f"Repository '{repo_info['id']}' {action} successfully.",
+        "repository": repo_info,
+    }
 
 
 @router.put("/{repo_id:path}", summary="Update repository information from GitHub")
-def update_repository(repo_id: str, token: Optional[str] = None, max_retries: int = Query(3, description="Maximum number of retries for GitHub API calls")):
-    # Use token from environment if not provided
-    if token is None:
-        token = getenv("GITHUB_TOKEN")
-        if token:
-            logging.info(f"Using GitHub token from environment: {token[:4]}...")
-        else:
-            logging.warning("No GitHub token found in environment")
+def update_repository(
+    repo_id: str,
+    token: Optional[str] = Depends(get_token),
+    max_retries: int = Query(3, description="Max retry attempts on rate limit."),
+):
     """
-    Update repository information from GitHub.
+    Update repository information from GitHub and create a new version snapshot.
 
     Args:
-        repo_id (str): The ID of the repository to update.
-        token (str, optional): GitHub API token for authentication. Defaults to None.
-        max_retries (int, optional): Maximum number of retries for GitHub API calls. Defaults to 3.
+        repo_id (str): Identifier in the format 'owner/name'.
+        token (str, optional): GitHub access token.
+        max_retries (int): Number of retry attempts on rate limit.
 
     Returns:
-        dict: A message indicating the result of the operation and the updated repository details.
+        dict: Message and the updated repository data.
 
     Raises:
-        HTTPException: If the repository is not found in the database, not found on GitHub,
-                      or there is an error updating the repository.
+        HTTPException: 404 if repository not found in DB or on GitHub.
+        HTTPException: 500 on other errors.
     """
-    # Check if repository exists in the database
-    existing_repo = get_repository(repo_id)
-    if not existing_repo:
-        raise HTTPException(status_code=404, detail=f"Repository {repo_id} not found in the database")
-
-    try:
-        owner, name = repo_id.strip().split('/')
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Repository ID must be in the format 'owner/name'")
-
-    # Retry logic for GitHub API rate limits
-    last_exception = None
-    for attempt in range(max_retries):
-        try:
-            # Get updated repository information from GitHub
-            repo_info = get_repo_info(owner, name, token=token)
-            if not repo_info:
-                raise HTTPException(status_code=404, detail=f"Repository {repo_id} not found on GitHub")
-
-            # Preserve existing tags and notes
-            if existing_repo:
-                repo_info['tags'] = existing_repo.get('tags', '')
-                repo_info['notes'] = existing_repo.get('notes', '')
-
-            # Save to DB using centralized logic
-            insert_or_update_repo(repo_info)
-
-            # Return success response with repository details
-            return {
-                "message": f"Repository '{repo_info['id']}' updated successfully.",
-                "repository": repo_info
-            }
-        except GithubException as e:
-            last_exception = e
-            if e.status == 403 and attempt < max_retries - 1:
-                # This might be a rate limit issue, wait and retry
-                logging.warning(f"GitHub API rate limit hit, retrying ({attempt+1}/{max_retries}): {e}")
-                time.sleep(2 ** attempt)  # Exponential backoff
-            elif e.status == 404:
-                # Repository not found
-                raise HTTPException(status_code=404, detail=f"Repository {repo_id} not found on GitHub")
-            else:
-                # Other GitHub exceptions
-                break
-        except Exception as e:
-            last_exception = e
-            logging.error(f"Error updating repository {repo_id}: {e}")
-            break
-
-    # If we get here, all retries failed or another exception occurred
-    error_message = str(last_exception) if last_exception else "Unknown error"
-    raise HTTPException(status_code=500, detail=f"Failed to update repository: {error_message}")
-
-
-class BatchRepositoryInput(BaseModel):
-    """Model for batch repository import."""
-    repositories: list[str] = Field(..., description="List of repository IDs in the format 'owner/name'")
-    token: Optional[str] = Field(None, description="GitHub API token for authentication")
-
-
-class RepositoryFieldsUpdate(BaseModel):
-    """Model for updating repository fields."""
-    license: Optional[str] = Field(None, description="Repository license")
-    stars: Optional[int] = Field(None, description="Number of stars")
-    topics: Optional[str] = Field(None, description="Repository topics")
-    commits: Optional[int] = Field(None, description="Total number of commits")
-    tags: Optional[str] = Field(None, description="Repository tags")
-    notes: Optional[str] = Field(None, description="Repository notes")
-
-
-class RepositoryMetadataUpdate(BaseModel):
-    """Model for updating repository metadata."""
-    tags: str = Field(..., description="Repository tags")
-    notes: str = Field(..., description="Repository notes")
+    existing = get_repository(repo_id)
+    if not existing:
+        raise HTTPException(404, f"{repo_id} not in DB")
+    owner, name = repo_id.split('/', 1)
+    repo_info = retry_github(
+        get_repo_info,
+        owner,
+        name,
+        token,
+        max_retries,
+        preserve={"tags": existing.get("tags"), "notes": existing.get("notes")},
+    )
+    insert_or_update_repo(repo_info)
+    # Create a new version to track this update
+    create_repository_version(repo_id, repo_info)
+    return {"message": f"Repository '{repo_id}' updated and versioned successfully.", "repository": repo_info}
 
 
 @router.post("/batch", summary="Import multiple repositories at once")
-def batch_import_repositories(batch_input: BatchRepositoryInput = Body(...)):
+def batch_import(batch: BatchRepositoryInput):
     """
-    Import multiple repositories at once.
+    Import multiple repositories from GitHub in a single request.
 
     Args:
-        batch_input (BatchRepositoryInput): The batch import request with a list of repository IDs.
+        batch (BatchRepositoryInput): List of repo IDs and optional token.
 
     Returns:
-        dict: A summary of the import operation.
-
-    Raises:
-        HTTPException: If there is an error with the batch import.
+        dict: Summary message and detailed results for each repo.
     """
-    if not batch_input.repositories:
-        raise HTTPException(status_code=400, detail="No repositories provided for import")
-
-    results = {
-        "successful": [],
-        "failed": []
-    }
-
-    for repo_id in batch_input.repositories:
+    results: Dict[str, List[Any]] = {"successful": [], "failed": []}
+    for repo_id in batch.repositories:
         try:
-            # Validate repository ID format
             if not re.match(r'^[\w.-]+/[\w.-]+$', repo_id):
-                results["failed"].append({
-                    "id": repo_id,
-                    "error": "Invalid repository ID format"
-                })
-                continue
-
-            owner, name = repo_id.strip().split('/')
-
-            # Get repository information from GitHub
-            repo_info = get_repo_info(owner, name, token=batch_input.token)
-            if not repo_info:
-                results["failed"].append({
-                    "id": repo_id,
-                    "error": "Repository not found on GitHub"
-                })
-                continue
-
-            # Check if repository already exists to preserve tags and notes
-            existing_repo = get_repository(repo_id)
-            if existing_repo:
-                repo_info['tags'] = existing_repo.get('tags', '')
-                repo_info['notes'] = existing_repo.get('notes', '')
-
-            # Save to DB
+                raise ValueError("Invalid format, expected 'owner/name'")
+            owner, name = repo_id.split('/', 1)
+            existing = get_repository(repo_id)
+            repo_info = retry_github(
+                get_repo_info,
+                owner,
+                name,
+                batch.token,
+                1,
+                preserve={"tags": existing.get("tags"), "notes": existing.get("notes")} if existing else None,
+            )
             insert_or_update_repo(repo_info)
-
-            # Add to successful list
-            results["successful"].append({
-                "id": repo_id,
-                "name": repo_info["name"]
-            })
-
+            # If this is an update (not a new repo), create a version
+            if existing:
+                create_repository_version(repo_id, repo_info)
+            results["successful"].append({"id": repo_id, "name": repo_info.get("name")})
         except Exception as e:
-            logging.error(f"Error importing repository {repo_id}: {e}")
-            results["failed"].append({
-                "id": repo_id,
-                "error": str(e)
-            })
-
-    # Return summary
+            results["failed"].append({"id": repo_id, "error": str(e)})
     return {
-        "message": f"Batch import completed. {len(results['successful'])} succeeded, {len(results['failed'])} failed.",
-        "results": results
+        "message": f"Batch import: {len(results['successful'])} succeeded, {len(results['failed'])} failed.",
+        "results": results,
     }
 
 
-@router.put("/{repo_id:path}/metadata/", summary="Update repository metadata (tags and notes)")
-def update_repository_metadata_endpoint(repo_id: str, metadata: RepositoryMetadataUpdate = Body(...)):
+@router.put(
+    "/{repo_id:path}/metadata/",
+    summary="Update repository metadata (tags and notes)"
+)
+def update_metadata(
+    repo_id: str,
+    meta: RepositoryMetadataUpdate = Body(...),
+):
     """
-    Update repository metadata (tags and notes).
+    Update metadata (tags and notes) for a repository.
 
     Args:
-        repo_id (str): The ID of the repository.
-        metadata (RepositoryMetadataUpdate): The metadata to update.
+        repo_id (str): Identifier in the format 'owner/name'.
+        meta (RepositoryMetadataUpdate): Contains new tags and notes.
 
     Returns:
-        dict: A message indicating the result of the operation and the updated repository details.
+        dict: Message and updated repository data.
 
     Raises:
-        HTTPException: If the repository is not found or there is an error updating the metadata.
+        HTTPException: 404 if repo not found.
+        HTTPException: 500 if metadata update fails.
     """
-    # Check if repository exists
-    existing_repo = get_repository(repo_id)
-    if not existing_repo:
-        raise HTTPException(status_code=404, detail=f"Repository {repo_id} not found in the database")
-
-    try:
-        # Update the metadata
-        success = update_repository_metadata(repo_id, metadata.tags, metadata.notes)
-
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to update repository metadata")
-
-        # Get the updated repository
-        updated_repo = get_repository(repo_id)
-
-        return {
-            "message": f"Repository '{repo_id}' metadata updated successfully.",
-            "repository": updated_repo
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logging.error(f"Error updating repository metadata for {repo_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to update repository metadata: {str(e)}")
+    if not get_repository(repo_id):
+        raise HTTPException(404, f"{repo_id} not found")
+    if not update_repository_metadata(repo_id, meta.tags, meta.notes):
+        raise HTTPException(500, "Metadata update failed")
+    return {"message": f"Metadata for '{repo_id}' updated.", "repository": get_repository(repo_id)}
 
 
-@router.patch("/{repo_id:path}/fields", summary="Update specific repository fields")
-def update_repository_field_values(repo_id: str, fields: RepositoryFieldsUpdate = Body(...)):
+@router.patch(
+    "/{repo_id:path}/fields",
+    summary="Update specific repository fields"
+)
+def update_fields(
+    repo_id: str,
+    fields: RepositoryFieldsUpdate = Body(...),
+):
     """
     Update specific fields of a repository.
 
     Args:
-        repo_id (str): The ID of the repository.
-        fields (RepositoryFieldsUpdate): The fields to update.
+        repo_id (str): Identifier in the format 'owner/name'.
+        fields (RepositoryFieldsUpdate): Fields to update.
 
     Returns:
-        dict: A message indicating the result of the operation and the updated repository details.
+        dict: Message and updated repository data.
 
     Raises:
-        HTTPException: If the repository is not found or there is an error updating the fields.
+        HTTPException: 404 if repo not found.
+        HTTPException: 400 if no fields provided.
+        HTTPException: 500 if update fails.
     """
-    # Check if repository exists
-    existing_repo = get_repository(repo_id)
-    if not existing_repo:
-        raise HTTPException(status_code=404, detail=f"Repository {repo_id} not found in the database")
-
-    try:
-        # Convert the fields model to a dictionary, excluding None values
-        fields_dict = {k: v for k, v in fields.dict().items() if v is not None}
-
-        if not fields_dict:
-            raise HTTPException(status_code=400, detail="No fields provided for update")
-
-        # Update the fields
-        success = update_repository_fields(repo_id, fields_dict)
-
-        if not success:
-            raise HTTPException(status_code=500, detail="Failed to update repository fields")
-
-        # Get the updated repository
-        updated_repo = get_repository(repo_id)
-
-        return {
-            "message": f"Repository '{repo_id}' fields updated successfully.",
-            "repository": updated_repo
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logging.error(f"Error updating repository fields for {repo_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to update repository fields: {str(e)}")
+    existing = get_repository(repo_id)
+    if not existing:
+        raise HTTPException(404, f"{repo_id} not found")
+    data_to_update = {k: v for k, v in fields.dict().items() if v is not None}
+    if not data_to_update:
+        raise HTTPException(400, "No fields to update")
+    if not update_repository_fields(repo_id, data_to_update):
+        raise HTTPException(500, "Field update failed")
+    return {"message": f"Fields for '{repo_id}' updated.", "repository": get_repository(repo_id)}
 
 
 @router.delete("/{repo_id:path}", summary="Delete a repository from the database")
@@ -428,30 +392,17 @@ def delete_repository(repo_id: str):
     Delete a repository from the database.
 
     Args:
-        repo_id (str): The ID of the repository to delete.
+        repo_id (str): Identifier in the format 'owner/name'.
 
     Returns:
-        dict: A message indicating the result of the operation.
+        dict: Message indicating deletion result.
 
     Raises:
-        HTTPException: If the repository is not found or there is an error deleting it.
+        HTTPException: 404 if repo not found.
+        HTTPException: 500 if delete fails.
     """
-    # Check if repository exists
-    existing_repo = get_repository(repo_id)
-    if not existing_repo:
-        raise HTTPException(status_code=404, detail=f"Repository {repo_id} not found")
-
-    try:
-        # Use the db function to delete the repository
-        success = db_delete_repository(repo_id)
-
-        if not success:
-            raise HTTPException(status_code=404, detail=f"Repository {repo_id} not found")
-
-        return {"message": f"Repository '{repo_id}' deleted successfully."}
-    except sqlite3.Error as e:
-        logging.error(f"Database error deleting repository {repo_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    except Exception as e:
-        logging.error(f"Error deleting repository {repo_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to delete repository: {str(e)}")
+    if not get_repository(repo_id):
+        raise HTTPException(404, f"{repo_id} not found")
+    if not db_delete_repository(repo_id):
+        raise HTTPException(500, "Delete failed")
+    return {"message": f"Repository '{repo_id}' deleted successfully."}
