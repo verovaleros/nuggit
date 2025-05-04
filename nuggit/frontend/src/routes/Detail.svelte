@@ -1294,7 +1294,7 @@
       <span>&larr;</span> Back to Home
     </button>
     <button class="add-repo" on:click={() => (window.location.hash = '#/?tab=add')}>
-      <span>+</span> Add Repo
+      <span>+</span> Add Repositories
     </button>
   </div>
   {#if loading}
@@ -1339,7 +1339,7 @@
         </div>
         <div class="info-item">
           <div class="info-label">GitHub</div>
-          <div class="info-value">
+          <div class="info-value" style="word-break: break-all;">
             <a href={repo.url} target="_blank">{repo.url}</a>
           </div>
         </div>

@@ -296,11 +296,23 @@ def batch_import(batch: BatchRepositoryInput):
         dict: Summary message and detailed results for each repo.
     """
     results: Dict[str, List[Any]] = {"successful": [], "failed": []}
-    for repo_id in batch.repositories:
+    for repo_input in batch.repositories:
         try:
-            if not re.match(r'^[\w.-]+/[\w.-]+$', repo_id):
-                raise ValueError("Invalid format, expected 'owner/name'")
-            owner, name = repo_id.split('/', 1)
+            # Check if this is a GitHub URL or username/repo format
+            if repo_input.startswith('http') and 'github.com' in repo_input:
+                # This is a GitHub URL
+                res = validate_repo_url(repo_input)
+                if not res:
+                    raise ValueError("Invalid GitHub URL")
+                owner, name = res
+                repo_id = f"{owner}/{name}"
+            elif re.match(r'^[\w.-]+/[\w.-]+$', repo_input):
+                # This is a username/repo format
+                owner, name = repo_input.split('/', 1)
+                repo_id = repo_input
+            else:
+                raise ValueError("Invalid format, expected 'owner/name' or GitHub URL")
+
             existing = get_repository(repo_id)
             repo_info = retry_github(
                 get_repo_info,
@@ -316,7 +328,7 @@ def batch_import(batch: BatchRepositoryInput):
                 create_repository_version(repo_id, repo_info)
             results["successful"].append({"id": repo_id, "name": repo_info.get("name")})
         except Exception as e:
-            results["failed"].append({"id": repo_id, "error": str(e)})
+            results["failed"].append({"id": repo_input, "error": str(e)})
     return {
         "message": f"Batch import: {len(results['successful'])} succeeded, {len(results['failed'])} failed.",
         "results": results,

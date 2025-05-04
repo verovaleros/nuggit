@@ -27,16 +27,12 @@
   let sortField = 'last_synced'; // Default sort by last_synced (most recent first)
   let sortOrder = 'desc'; // Default sort order is descending
 
-  // New repo
-  let newRepoId = '';
+  // Repository adding
+  let repoIds = '';
   let addStatus = '';
   let isAdding = false;
-
-  // Batch add repos
-  let batchRepoIds = '';
-  let batchAddStatus = '';
-  let isBatchAdding = false;
-  let batchResults = null;
+  let addResults = null;
+  let processingRepos = [];
 
   // Tags and stats
   $: allTags = Array.from(
@@ -219,86 +215,145 @@
     }
   }
 
-  async function addRepo() {
-    if (!newRepoId.trim()) {
-      addStatus = 'Please enter a valid repository ID.';
-      return;
-    }
-
-    isAdding = true;
-    addStatus = '';
-    const repo_id = newRepoId.trim();
-
-    try {
-      const res = await fetch('http://localhost:8001/repositories/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: repo_id })
-      });
-
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(errText);
-      }
-
-      addStatus = '✅ Repository added!';
-      newRepoId = '';
-
-      const data = await fetch('http://localhost:8001/repositories/').then(r => r.json());
-      allRepos = data.repositories;
-      // Update filteredRepos based on current search term and sort settings
-      filteredRepos = sortRepositories(allRepos.filter(matchesSearch));
-
-      const encoded = btoa(repo_id);
-      window.location.hash = `#/repo/${encoded}`;
-    } catch (err) {
-      console.error(err);
-      addStatus = `❌ Error: ${err.message}`;
-    } finally {
-      isAdding = false;
-    }
+  // Helper function to determine if a string is a GitHub URL
+  function isGitHubUrl(str) {
+    return str.startsWith('http') && str.includes('github.com/');
   }
 
-  async function addBatchRepos() {
-    if (!batchRepoIds.trim()) {
-      batchAddStatus = 'Please enter at least one repository ID.';
+  // Helper function to process repositories one by one with progressive feedback
+  async function processRepositories(repos) {
+    const results = { successful: [], failed: [] };
+
+    for (let i = 0; i < repos.length; i++) {
+      const repoInput = repos[i];
+
+      // Update the status to show we're processing this repository
+      processingRepos = processingRepos.map((repo, index) =>
+        index === i
+          ? { ...repo, status: 'processing', message: 'Processing...' }
+          : repo
+      );
+
+      try {
+        // Determine if this is a URL or username/repo format
+        const isUrl = isGitHubUrl(repoInput);
+
+        // Make the API call to add this repository
+        // For now, let's use the batch endpoint which is working
+        const res = await fetch('http://localhost:8001/repositories/batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repositories: [repoInput] })
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          throw new Error(errText);
+        }
+
+        const data = await res.json();
+
+        // Check if the repository was added successfully
+        if (data.results.successful.length > 0) {
+          const successfulRepo = data.results.successful[0];
+
+          // Update the processing status for this repository
+          processingRepos = processingRepos.map((repo, index) =>
+            index === i
+              ? {
+                  ...repo,
+                  status: 'success',
+                  message: 'Successfully added',
+                  name: successfulRepo.name,
+                  id: successfulRepo.id // Update with the canonical ID
+                }
+              : repo
+          );
+
+          // Add to successful results
+          results.successful.push({
+            id: successfulRepo.id,
+            name: successfulRepo.name
+          });
+        } else if (data.results.failed.length > 0) {
+          const failedRepo = data.results.failed[0];
+          throw new Error(failedRepo.error);
+        } else {
+          throw new Error("Unknown error occurred");
+        }
+
+      } catch (err) {
+        console.error(`Error processing repository ${repoInput}:`, err);
+
+        // Update the processing status for this repository
+        processingRepos = processingRepos.map((repo, index) =>
+          index === i
+            ? { ...repo, status: 'error', message: err.message }
+            : repo
+        );
+
+        // Add to failed results
+        results.failed.push({
+          id: repoInput,
+          error: err.message
+        });
+      }
+    }
+
+    return results;
+  }
+
+  async function addRepositories() {
+    if (!repoIds.trim()) {
+      addStatus = 'Please enter at least one repository ID.';
       return;
     }
 
-    // Parse the input into an array of repository IDs
-    const repoIds = batchRepoIds
+    // Parse the input into an array of repository IDs or URLs
+    const repos = repoIds
       .split('\n')
       .map(id => id.trim())
       .filter(id => id.length > 0);
 
-    if (repoIds.length === 0) {
-      batchAddStatus = 'Please enter at least one valid repository ID.';
+    if (repos.length === 0) {
+      addStatus = 'Please enter at least one valid repository ID or URL.';
       return;
     }
 
-    isBatchAdding = true;
-    batchAddStatus = 'Adding repositories...';
-    batchResults = null;
+    isAdding = true;
+    addStatus = 'Adding repositories...';
+    addResults = null;
+
+    // Initialize progress tracking for each repository
+    processingRepos = repos.map(id => ({
+      id,
+      status: 'pending', // pending, processing, success, error
+      message: 'Waiting to process...',
+      name: ''
+    }));
+
+    // For a single repository, we'll redirect to its detail page after adding
+    const isSingleRepo = repos.length === 1;
+    let singleRepoId = isSingleRepo ? repos[0] : null;
 
     try {
-      const res = await fetch('http://localhost:8001/repositories/batch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repositories: repoIds })
-      });
+      // Update UI to show we're starting
+      addStatus = `Processing ${repos.length} repositories...`;
 
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(errText);
-      }
+      // Process repositories one by one with progressive feedback
+      const results = await processRepositories(repos);
 
-      const data = await res.json();
-      batchResults = data;
-      batchAddStatus = data.message;
+      // Create a results object similar to what the batch API returns
+      addResults = {
+        message: `Batch import: ${results.successful.length} succeeded, ${results.failed.length} failed.`,
+        results: results
+      };
+
+      addStatus = addResults.message;
 
       // If all repositories were added successfully, clear the input
-      if (data.results.failed.length === 0) {
-        batchRepoIds = '';
+      if (results.failed.length === 0) {
+        repoIds = '';
       }
 
       // Refresh the repository list
@@ -307,11 +362,24 @@
       // Update filteredRepos based on current search term and sort settings
       filteredRepos = sortRepositories(allRepos.filter(matchesSearch));
 
+      // If it was a single repository and it was added successfully, redirect to its detail page
+      if (isSingleRepo && results.successful.length > 0) {
+        const successfulRepo = results.successful[0];
+        const encoded = btoa(successfulRepo.id);
+        window.location.hash = `#/repo/${encoded}`;
+      }
     } catch (err) {
       console.error(err);
-      batchAddStatus = `❌ Error: ${err.message}`;
+      addStatus = `❌ Error: ${err.message}`;
+
+      // Mark all repositories as failed due to the overall error
+      processingRepos = processingRepos.map(repo => ({
+        ...repo,
+        status: 'error',
+        message: err.message
+      }));
     } finally {
-      isBatchAdding = false;
+      isAdding = false;
     }
   }
 </script>
@@ -573,6 +641,85 @@
     animation: fadeIn 0.3s ease-in-out;
   }
 
+  .repo-progress {
+    margin-top: 1.5rem;
+    max-width: 500px;
+    margin-left: auto;
+    margin-right: auto;
+    text-align: left;
+  }
+
+  .repo-progress-item {
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    border-radius: 6px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    transition: all 0.3s ease;
+  }
+
+  .repo-progress-item.status-pending {
+    background-color: #f3f4f6;
+    border: 1px solid #d1d5db;
+  }
+
+  .repo-progress-item.status-processing {
+    background-color: #eff6ff;
+    border: 1px solid #93c5fd;
+  }
+
+  .repo-progress-item.status-success {
+    background-color: #ecfdf5;
+    border: 1px solid #10b981;
+  }
+
+  .repo-progress-item.status-error {
+    background-color: #fef2f2;
+    border: 1px solid #ef4444;
+  }
+
+  .repo-id {
+    font-weight: bold;
+    font-family: monospace;
+  }
+
+  .repo-status {
+    font-size: 0.9rem;
+  }
+
+  .results-summary {
+    display: flex;
+    justify-content: center;
+    gap: 2rem;
+    margin-top: 1.5rem;
+  }
+
+  .summary-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .summary-count {
+    font-size: 2rem;
+    font-weight: bold;
+    margin-bottom: 0.25rem;
+  }
+
+  .summary-count.success {
+    color: #10b981;
+  }
+
+  .summary-count.failed {
+    color: #ef4444;
+  }
+
+  .summary-label {
+    font-size: 0.9rem;
+    color: #6b7280;
+  }
+
   @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
@@ -668,74 +815,63 @@
 
   {:else if currentTab === 'add'}
     <div class="center tabs-content">
-      <h2>➕ Add Repository</h2>
+      <h2>➕ Add Repositories</h2>
 
-      <!-- Single Repository Add Section -->
-      <div style="margin-bottom: 3rem;">
-        <h3>Add Single Repository</h3>
-        <input
-          type="text"
-          placeholder="username/repo"
-          bind:value={newRepoId}
-          style="width: 300px; margin-top: 1rem; font-size: 1rem;"
-        />
+      <!-- Repository Add Section -->
+      <div>
+        <p>Enter one or more repositories (one per line):</p>
+        <p><small>Accepted formats: <code>username/repo</code> or <code>https://github.com/username/repo</code></small></p>
+        <textarea
+          class="batch-textarea"
+          placeholder="username1/repo1
+https://github.com/username2/repo2
+username3/repo3"
+          bind:value={repoIds}
+        ></textarea>
         <div style="margin-top: 1rem;">
-          <button class="add-repo-button" on:click={addRepo} disabled={isAdding}>
-            {isAdding ? 'Adding...' : 'Add Repository'}
+          <button class="add-repo-button" on:click={addRepositories} disabled={isAdding}>
+            {isAdding ? 'Adding...' : 'Add Repositories'}
           </button>
         </div>
         {#if addStatus}
           <p style="margin-top: 1rem;">{addStatus}</p>
         {/if}
-      </div>
 
-      <!-- Batch Add Section -->
-      <div>
-        <h3>Batch Add Repositories</h3>
-        <p>Enter one repository ID per line (format: username/repo)</p>
-        <textarea
-          class="batch-textarea"
-          placeholder="username1/repo1
-username2/repo2
-username3/repo3"
-          bind:value={batchRepoIds}
-        ></textarea>
-        <div style="margin-top: 1rem;">
-          <button class="add-repo-button" on:click={addBatchRepos} disabled={isBatchAdding}>
-            {isBatchAdding ? 'Adding...' : 'Add Repositories'}
-          </button>
-        </div>
-        {#if batchAddStatus}
-          <p style="margin-top: 1rem;">{batchAddStatus}</p>
+        <!-- Processing Status -->
+        {#if processingRepos.length > 0}
+          <div class="repo-progress">
+            {#each processingRepos as repo}
+              <div class="repo-progress-item status-{repo.status}">
+                <div class="repo-id">{repo.id}</div>
+                <div class="repo-status">
+                  {#if repo.status === 'pending'}
+                    ⏳ {repo.message}
+                  {:else if repo.status === 'processing'}
+                    🔄 {repo.message}
+                  {:else if repo.status === 'success'}
+                    ✅ {repo.message} {repo.name ? `- ${repo.name}` : ''}
+                  {:else if repo.status === 'error'}
+                    ❌ {repo.message}
+                  {/if}
+                </div>
+              </div>
+            {/each}
+          </div>
         {/if}
 
-        <!-- Batch Results -->
-        {#if batchResults}
+        <!-- Final Results Summary -->
+        {#if addResults}
           <div class="batch-results">
-            <!-- Successful Repositories -->
-            {#if batchResults.results.successful.length > 0}
-              <h3>✅ Successfully Added ({batchResults.results.successful.length})</h3>
-              <div class="success-list">
-                {#each batchResults.results.successful as repo}
-                  <div class="repo-item">
-                    <strong>{repo.id}</strong> - {repo.name}
-                  </div>
-                {/each}
+            <div class="results-summary">
+              <div class="summary-item">
+                <span class="summary-count success">{addResults.results.successful.length}</span>
+                <span class="summary-label">Successful</span>
               </div>
-            {/if}
-
-            <!-- Failed Repositories -->
-            {#if batchResults.results.failed.length > 0}
-              <h3>❌ Failed to Add ({batchResults.results.failed.length})</h3>
-              <div class="failed-list">
-                {#each batchResults.results.failed as repo}
-                  <div class="repo-item">
-                    <strong>{repo.id}</strong>
-                    <div class="error-message">{repo.error}</div>
-                  </div>
-                {/each}
+              <div class="summary-item">
+                <span class="summary-count failed">{addResults.results.failed.length}</span>
+                <span class="summary-label">Failed</span>
               </div>
-            {/if}
+            </div>
           </div>
         {/if}
       </div>
