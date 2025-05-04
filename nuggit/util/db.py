@@ -462,3 +462,41 @@ def get_versions(repo_id: str) -> List[Dict[str, Any]]:
     query = "SELECT id, version_number, release_date, description, created_at FROM repository_versions WHERE repo_id = ? ORDER BY created_at DESC"
     with get_connection() as conn:
         return [dict(r) for r in conn.execute(query, (repo_id,))]
+
+
+def create_repository_version(repo_id: str, repo_info: Dict[str, Any]) -> int:
+    """
+    Create a new version when a repository is updated from GitHub.
+    Uses the current date (YYYY.MM.DD) as the version number.
+
+    Args:
+        repo_id (str): The ID of the repository.
+        repo_info (Dict[str, Any]): The updated repository information.
+
+    Returns:
+        int: The ID of the newly added version.
+
+    Raises:
+        sqlite3.Error: If the database insert fails.
+    """
+    today = datetime.utcnow().date()
+    version_name = today.strftime("%Y.%m.%d")
+    release_date = today.isoformat()
+
+    # Create a description that includes what changed
+    description = f"Updated from GitHub on {release_date}"
+
+    # Check if there are existing versions with the same version number
+    existing_versions = get_versions(repo_id)
+    same_day_versions = [v for v in existing_versions if v["version_number"] == version_name]
+
+    # If there are versions from the same day, append a suffix
+    if same_day_versions:
+        version_name = f"{version_name}.{len(same_day_versions) + 1}"
+
+    return add_version(
+        repo_id=repo_id,
+        version_number=version_name,
+        release_date=release_date,
+        description=description
+    )
