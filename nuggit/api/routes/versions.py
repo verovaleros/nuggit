@@ -192,11 +192,29 @@ async def compare_versions(
     if version2_id not in version_map:
         raise HTTPException(status_code=404, detail=f"Version {version2_id} not found")
     v1, v2 = version_map[version1_id], version_map[version2_id]
+
+    # Get repository data at each version's timestamp
+    repo1 = await get_repository_at_version(repo["id"], v1["created_at"])
+    repo2 = await get_repository_at_version(repo["id"], v2["created_at"])
+
+    # Compare version metadata
     differences = {
         "version_number": _compare_text(v1["version_number"], v2["version_number"]),
         "release_date": _compare_text(v1.get("release_date", ""), v2.get("release_date", "")),
         "description": _compare_text(v1.get("description", ""), v2.get("description", ""))
     }
+
+    # Compare repository metrics
+    repo_fields = [
+        "license", "stars", "forks", "issues", "contributors", "commits",
+        "topics", "description", "last_commit"
+    ]
+
+    for field in repo_fields:
+        # Convert values to strings for comparison
+        val1 = str(repo1.get(field, ""))
+        val2 = str(repo2.get(field, ""))
+        differences[field] = _compare_text(val1, val2)
     return VersionComparisonResponse(version1=v1, version2=v2, differences=differences)
 
 

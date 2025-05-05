@@ -484,8 +484,8 @@
   function formatDiff(diff) {
     if (!diff) return '';
 
-    // Split the diff into lines
-    const lines = diff.split('\n');
+    // Check if diff is already an array (from API) or a string
+    const lines = Array.isArray(diff) ? diff : diff.split('\n');
 
     // Format each line with appropriate styling
     return lines.map(line => {
@@ -497,6 +497,74 @@
         return line;
       }
     }).join('\n');
+  }
+
+  function formatMetricChange(diff) {
+    console.log("formatMetricChange called with:", diff);
+
+    if (!diff || !Array.isArray(diff) || diff.length === 0) return 'No changes';
+
+    // Extract the values from the diff
+    // The diff format is typically ['-value1', '+value2']
+    let oldValue = '';
+    let newValue = '';
+
+    for (const line of diff) {
+      if (line.startsWith('-')) {
+        oldValue = line.substring(1).trim();
+      } else if (line.startsWith('+')) {
+        newValue = line.substring(1).trim();
+      }
+    }
+
+    console.log("Extracted values:", { oldValue, newValue });
+
+    // Convert to numbers if possible
+    const oldNum = parseInt(oldValue, 10);
+    const newNum = parseInt(newValue, 10);
+
+    console.log("Parsed numbers:", { oldNum, newNum });
+
+    // If both are valid numbers, calculate the difference
+    if (!isNaN(oldNum) && !isNaN(newNum)) {
+      const difference = newNum - oldNum;
+
+      if (difference > 0) {
+        return `<div class="metric-values-card">
+                  <span class="old-value">${oldNum}</span>
+                  <span class="arrow">→</span>
+                  <span class="new-value">${newNum}</span>
+                </div>
+                <div class="change-indicator-card increase">
+                  <span class="change-icon">↑</span>
+                  <span class="change-value">+${difference}</span>
+                </div>`;
+      } else if (difference < 0) {
+        return `<div class="metric-values-card">
+                  <span class="old-value">${oldNum}</span>
+                  <span class="arrow">→</span>
+                  <span class="new-value">${newNum}</span>
+                </div>
+                <div class="change-indicator-card decrease">
+                  <span class="change-icon">↓</span>
+                  <span class="change-value">${difference}</span>
+                </div>`;
+      } else {
+        return `<div class="metric-values-card">
+                  <span class="value">${newNum}</span>
+                </div>
+                <div class="change-indicator-card neutral">
+                  <span class="change-value">No change</span>
+                </div>`;
+      }
+    }
+
+    // If not numbers, just show the text diff
+    return `<div class="metric-values-card">
+              <span class="old-value">${oldValue}</span>
+              <span class="arrow">→</span>
+              <span class="new-value">${newValue}</span>
+            </div>`;
   }
 
   // Format date to human-readable format
@@ -1281,9 +1349,24 @@
 
   .comparison-results {
     margin-top: 1.5rem;
+  }
+
+  .comparison-section {
+    margin-bottom: 2rem;
+  }
+
+  .comparison-section h3 {
+    font-size: 1.2rem;
+    color: #1f2937;
+    margin-bottom: 1rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .comparison-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    gap: 1.5rem;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 1rem;
   }
 
   .comparison-field {
@@ -1330,6 +1413,93 @@
     padding: 0.1rem 0.3rem;
     margin: 0.1rem 0;
     border-radius: 3px;
+  }
+
+  /* Metric comparison styles */
+  .metric-card {
+    width: 220px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .metric-comparison {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .metric-values-card {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    background-color: white;
+    border-radius: 8px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  }
+
+  .old-value, .new-value, .value {
+    font-weight: bold;
+    font-size: 1.1rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+  }
+
+  .old-value {
+    color: #4b5563;
+    background-color: #f3f4f6;
+  }
+
+  .new-value {
+    color: #1f2937;
+    background-color: white;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  }
+
+  .arrow {
+    color: #6b7280;
+    font-size: 1.1rem;
+  }
+
+  .change-indicator-card {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.5rem;
+    font-size: 1rem;
+    font-weight: 700;
+    color: white;
+    text-align: center;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+
+  .change-indicator-card.increase {
+    background-color: #16a34a;
+  }
+
+  .change-indicator-card.decrease {
+    background-color: #dc2626;
+  }
+
+  .change-indicator-card.neutral {
+    background-color: #6b7280;
+  }
+
+  .change-icon {
+    font-weight: bold;
+  }
+
+  .text-change {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    padding: 0.75rem;
   }
 
   .comparison-error {
@@ -1802,143 +1972,6 @@
         {/if}
       </div>
 
-      <!-- Compare versions button -->
-      {#if repo.versions && repo.versions.length > 1}
-        <div style="text-align: center; margin-top: 1rem;">
-          <button on:click={toggleComparison}>
-            {showComparison ? 'Hide Comparison' : 'Compare Versions'}
-          </button>
-        </div>
-      {/if}
-
-      <!-- Version comparison UI -->
-      {#if showComparison}
-        <div class="comparison-container">
-          <div class="comparison-header">
-            <h3>Version Comparison</h3>
-            <button class="close-comparison-button" on:click={toggleComparison}>Close</button>
-          </div>
-
-          <div class="comparison-selectors">
-            <div class="comparison-selector">
-              <label for="version1-select">First Version:</label>
-              <select id="version1-select" bind:value={selectedVersion1}>
-                <option value={null}>Select a version</option>
-                {#each repo.versions as version}
-                  <option value={version.id}>{version.version_number}</option>
-                {/each}
-              </select>
-            </div>
-
-            <div class="comparison-selector">
-              <label for="version2-select">Second Version:</label>
-              <select id="version2-select" bind:value={selectedVersion2}>
-                <option value={null}>Select a version</option>
-                {#each repo.versions as version}
-                  <option value={version.id}>{version.version_number}</option>
-                {/each}
-              </select>
-            </div>
-          </div>
-
-          <div style="text-align: center;">
-            <button class="compare-button" on:click={compareVersions} disabled={loadingComparison}>
-              {loadingComparison ? 'Comparing...' : 'Compare'}
-            </button>
-          </div>
-
-          {#if comparisonError}
-            <p class="comparison-error">{comparisonError}</p>
-          {/if}
-
-          {#if loadingComparison}
-            <p class="comparison-loading">Loading comparison...</p>
-          {/if}
-
-          {#if comparisonResult}
-            <div class="comparison-results">
-              <div class="comparison-field">
-                <h4>Version Number</h4>
-                {#if comparisonResult.differences.version_number.changed}
-                  <div class="diff-display" >
-                    {@html formatDiff(comparisonResult.differences.version_number.diff)}
-                  </div>
-                {:else}
-                  <p>No changes</p>
-                {/if}
-              </div>
-
-              <div class="comparison-field">
-                <h4>Release Date</h4>
-                {#if comparisonResult.differences.release_date.changed}
-                  <div class="diff-display">
-                    {@html formatDiff(comparisonResult.differences.release_date.diff)}
-                  </div>
-                {:else}
-                  <p>No changes</p>
-                {/if}
-              </div>
-
-              <div class="comparison-field">
-                <h4>Description</h4>
-                {#if comparisonResult.differences.description.changed}
-                  <div class="diff-display">
-                    {@html formatDiff(comparisonResult.differences.description.diff)}
-                  </div>
-                {:else}
-                  <p>No changes</p>
-                {/if}
-              </div>
-
-              <!-- New repository fields -->
-              <div class="comparison-field">
-                <h4>License</h4>
-                {#if comparisonResult.differences.license && comparisonResult.differences.license.changed}
-                  <div class="diff-display">
-                    {@html formatDiff(comparisonResult.differences.license.diff)}
-                  </div>
-                {:else}
-                  <p>No changes</p>
-                {/if}
-              </div>
-
-              <div class="comparison-field">
-                <h4>Stars</h4>
-                {#if comparisonResult.differences.stars && comparisonResult.differences.stars.changed}
-                  <div class="diff-display">
-                    {@html formatDiff(comparisonResult.differences.stars.diff)}
-                  </div>
-                {:else}
-                  <p>No changes</p>
-                {/if}
-              </div>
-
-              <div class="comparison-field">
-                <h4>Topics</h4>
-                {#if comparisonResult.differences.topics && comparisonResult.differences.topics.changed}
-                  <div class="diff-display">
-                    {@html formatDiff(comparisonResult.differences.topics.diff)}
-                  </div>
-                {:else}
-                  <p>No changes</p>
-                {/if}
-              </div>
-
-              <div class="comparison-field">
-                <h4>Total Commits</h4>
-                {#if comparisonResult.differences.commits && comparisonResult.differences.commits.changed}
-                  <div class="diff-display">
-                    {@html formatDiff(comparisonResult.differences.commits.diff)}
-                  </div>
-                {:else}
-                  <p>No changes</p>
-                {/if}
-              </div>
-            </div>
-          {/if}
-        </div>
-      {/if}
-
       <!-- Versions list -->
       <div class="versions-list">
         {#if repo.versions && repo.versions.length > 0}
@@ -1961,6 +1994,282 @@
           <p style="text-align: center;">No versions tracked yet. Add the first version above!</p>
         {/if}
       </div>
+    </div>
+
+    <!-- Compare Versions Section (Collapsible) -->
+    <div class="section-header" on:click={toggleComparison}>
+      <h2>🔍 Compare Versions</h2>
+      <span class="toggle-icon {!showComparison ? 'collapsed' : ''}">▾</span>
+    </div>
+
+    <div class="section-content {!showComparison ? 'collapsed' : ''}">
+      {#if repo.versions && repo.versions.length > 1}
+        <div class="comparison-selectors">
+          <div class="comparison-selector">
+            <label for="version1-select">First Version:</label>
+            <select id="version1-select" bind:value={selectedVersion1}>
+              <option value={null}>Select a version</option>
+              {#each repo.versions as version}
+                <option value={version.id}>{version.version_number}</option>
+              {/each}
+            </select>
+          </div>
+
+          <div class="comparison-selector">
+            <label for="version2-select">Second Version:</label>
+            <select id="version2-select" bind:value={selectedVersion2}>
+              <option value={null}>Select a version</option>
+              {#each repo.versions as version}
+                <option value={version.id}>{version.version_number}</option>
+              {/each}
+            </select>
+          </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 1rem;">
+          <button class="compare-button" on:click={compareVersions} disabled={loadingComparison}>
+            {loadingComparison ? 'Comparing...' : 'Compare'}
+          </button>
+        </div>
+
+        {#if comparisonError}
+          <p class="comparison-error">{comparisonError}</p>
+        {/if}
+
+        {#if loadingComparison}
+          <p class="comparison-loading">Loading comparison...</p>
+        {/if}
+
+        {#if comparisonResult}
+          <div class="comparison-results">
+            <div class="comparison-grid">
+              <!-- Description (only once) -->
+              <div class="comparison-field">
+                <h4>Description</h4>
+                {#if comparisonResult.differences.description && comparisonResult.differences.description.changed}
+                  <div class="diff-display">
+                    {@html formatDiff(comparisonResult.differences.description.diff)}
+                  </div>
+                {:else}
+                  <p>No changes</p>
+                {/if}
+              </div>
+
+              <!-- Repository metrics -->
+
+              <div class="comparison-field metric-card">
+                <h4>Stars ⭐</h4>
+                {#if comparisonResult.differences.stars && comparisonResult.differences.stars.changed}
+                  {@const diff = comparisonResult.differences.stars.diff}
+                  {@const oldValue = diff.find(line => line.startsWith('-'))?.substring(1).trim() || ''}
+                  {@const newValue = diff.find(line => line.startsWith('+'))?.substring(1).trim() || ''}
+                  {@const oldNum = parseInt(oldValue, 10)}
+                  {@const newNum = parseInt(newValue, 10)}
+                  {@const difference = !isNaN(oldNum) && !isNaN(newNum) ? newNum - oldNum : null}
+
+                  <div class="metric-comparison">
+                    <!-- Values card -->
+                    <div class="metric-values-card">
+                      {#if !isNaN(oldNum) && !isNaN(newNum)}
+                        <span class="old-value">{oldNum}</span>
+                        <span class="arrow">→</span>
+                        <span class="new-value">{newNum}</span>
+                      {:else}
+                        <span class="old-value">{oldValue}</span>
+                        <span class="arrow">→</span>
+                        <span class="new-value">{newValue}</span>
+                      {/if}
+                    </div>
+
+                    <!-- Change indicator card -->
+                    {#if difference !== null}
+                      <div class="change-indicator-card {difference > 0 ? 'increase' : difference < 0 ? 'decrease' : 'neutral'}">
+                        <span class="change-icon">{difference > 0 ? '↑' : difference < 0 ? '↓' : ''}</span>
+                        <span class="change-value">{difference > 0 ? '+' : ''}{difference}</span>
+                      </div>
+                    {/if}
+                  </div>
+                {:else}
+                  <p>No changes</p>
+                {/if}
+              </div>
+
+              <div class="comparison-field metric-card">
+                <h4>Forks 🍴</h4>
+                {#if comparisonResult.differences.forks && comparisonResult.differences.forks.changed}
+                  {@const diff = comparisonResult.differences.forks.diff}
+                  {@const oldValue = diff.find(line => line.startsWith('-'))?.substring(1).trim() || ''}
+                  {@const newValue = diff.find(line => line.startsWith('+'))?.substring(1).trim() || ''}
+                  {@const oldNum = parseInt(oldValue, 10)}
+                  {@const newNum = parseInt(newValue, 10)}
+                  {@const difference = !isNaN(oldNum) && !isNaN(newNum) ? newNum - oldNum : null}
+
+                  <div class="metric-comparison">
+                    <!-- Values card -->
+                    <div class="metric-values-card">
+                      {#if !isNaN(oldNum) && !isNaN(newNum)}
+                        <span class="old-value">{oldNum}</span>
+                        <span class="arrow">→</span>
+                        <span class="new-value">{newNum}</span>
+                      {:else}
+                        <span class="old-value">{oldValue}</span>
+                        <span class="arrow">→</span>
+                        <span class="new-value">{newValue}</span>
+                      {/if}
+                    </div>
+
+                    <!-- Change indicator card -->
+                    {#if difference !== null}
+                      <div class="change-indicator-card {difference > 0 ? 'increase' : difference < 0 ? 'decrease' : 'neutral'}">
+                        <span class="change-icon">{difference > 0 ? '↑' : difference < 0 ? '↓' : ''}</span>
+                        <span class="change-value">{difference > 0 ? '+' : ''}{difference}</span>
+                      </div>
+                    {/if}
+                  </div>
+                {:else}
+                  <p>No changes</p>
+                {/if}
+              </div>
+
+              <div class="comparison-field metric-card">
+                <h4>Commits ✍️</h4>
+                {#if comparisonResult.differences.commits && comparisonResult.differences.commits.changed}
+                  {@const diff = comparisonResult.differences.commits.diff}
+                  {@const oldValue = diff.find(line => line.startsWith('-'))?.substring(1).trim() || ''}
+                  {@const newValue = diff.find(line => line.startsWith('+'))?.substring(1).trim() || ''}
+                  {@const oldNum = parseInt(oldValue, 10)}
+                  {@const newNum = parseInt(newValue, 10)}
+                  {@const difference = !isNaN(oldNum) && !isNaN(newNum) ? newNum - oldNum : null}
+
+                  <div class="metric-comparison">
+                    <!-- Values card -->
+                    <div class="metric-values-card">
+                      {#if !isNaN(oldNum) && !isNaN(newNum)}
+                        <span class="old-value">{oldNum}</span>
+                        <span class="arrow">→</span>
+                        <span class="new-value">{newNum}</span>
+                      {:else}
+                        <span class="old-value">{oldValue}</span>
+                        <span class="arrow">→</span>
+                        <span class="new-value">{newValue}</span>
+                      {/if}
+                    </div>
+
+                    <!-- Change indicator card -->
+                    {#if difference !== null}
+                      <div class="change-indicator-card {difference > 0 ? 'increase' : difference < 0 ? 'decrease' : 'neutral'}">
+                        <span class="change-icon">{difference > 0 ? '↑' : difference < 0 ? '↓' : ''}</span>
+                        <span class="change-value">{difference > 0 ? '+' : ''}{difference}</span>
+                      </div>
+                    {/if}
+                  </div>
+                {:else}
+                  <p>No changes</p>
+                {/if}
+              </div>
+
+              <div class="comparison-field metric-card">
+                <h4>Issues 🐞</h4>
+                {#if comparisonResult.differences.issues && comparisonResult.differences.issues.changed}
+                  {@const diff = comparisonResult.differences.issues.diff}
+                  {@const oldValue = diff.find(line => line.startsWith('-'))?.substring(1).trim() || ''}
+                  {@const newValue = diff.find(line => line.startsWith('+'))?.substring(1).trim() || ''}
+                  {@const oldNum = parseInt(oldValue, 10)}
+                  {@const newNum = parseInt(newValue, 10)}
+                  {@const difference = !isNaN(oldNum) && !isNaN(newNum) ? newNum - oldNum : null}
+
+                  <div class="metric-comparison">
+                    <!-- Values card -->
+                    <div class="metric-values-card">
+                      {#if !isNaN(oldNum) && !isNaN(newNum)}
+                        <span class="old-value">{oldNum}</span>
+                        <span class="arrow">→</span>
+                        <span class="new-value">{newNum}</span>
+                      {:else}
+                        <span class="old-value">{oldValue}</span>
+                        <span class="arrow">→</span>
+                        <span class="new-value">{newValue}</span>
+                      {/if}
+                    </div>
+
+                    <!-- Change indicator card -->
+                    {#if difference !== null}
+                      <div class="change-indicator-card {difference > 0 ? 'increase' : difference < 0 ? 'decrease' : 'neutral'}">
+                        <span class="change-icon">{difference > 0 ? '↑' : difference < 0 ? '↓' : ''}</span>
+                        <span class="change-value">{difference > 0 ? '+' : ''}{difference}</span>
+                      </div>
+                    {/if}
+                  </div>
+                {:else}
+                  <p>No changes</p>
+                {/if}
+              </div>
+
+              <div class="comparison-field metric-card">
+                <h4>Contributors 🧑‍🤝‍🧑</h4>
+                {#if comparisonResult.differences.contributors && comparisonResult.differences.contributors.changed}
+                  {@const diff = comparisonResult.differences.contributors.diff}
+                  {@const oldValue = diff.find(line => line.startsWith('-'))?.substring(1).trim() || ''}
+                  {@const newValue = diff.find(line => line.startsWith('+'))?.substring(1).trim() || ''}
+                  {@const oldNum = parseInt(oldValue, 10)}
+                  {@const newNum = parseInt(newValue, 10)}
+                  {@const difference = !isNaN(oldNum) && !isNaN(newNum) ? newNum - oldNum : null}
+
+                  <div class="metric-comparison">
+                    <!-- Values card -->
+                    <div class="metric-values-card">
+                      {#if !isNaN(oldNum) && !isNaN(newNum)}
+                        <span class="old-value">{oldNum}</span>
+                        <span class="arrow">→</span>
+                        <span class="new-value">{newNum}</span>
+                      {:else}
+                        <span class="old-value">{oldValue}</span>
+                        <span class="arrow">→</span>
+                        <span class="new-value">{newValue}</span>
+                      {/if}
+                    </div>
+
+                    <!-- Change indicator card -->
+                    {#if difference !== null}
+                      <div class="change-indicator-card {difference > 0 ? 'increase' : difference < 0 ? 'decrease' : 'neutral'}">
+                        <span class="change-icon">{difference > 0 ? '↑' : difference < 0 ? '↓' : ''}</span>
+                        <span class="change-value">{difference > 0 ? '+' : ''}{difference}</span>
+                      </div>
+                    {/if}
+                  </div>
+                {:else}
+                  <p>No changes</p>
+                {/if}
+              </div>
+
+              <!-- Repository information -->
+              <div class="comparison-field">
+                <h4>License</h4>
+                {#if comparisonResult.differences.license && comparisonResult.differences.license.changed}
+                  <div class="diff-display">
+                    {@html formatDiff(comparisonResult.differences.license.diff)}
+                  </div>
+                {:else}
+                  <p>No changes</p>
+                {/if}
+              </div>
+
+              <div class="comparison-field">
+                <h4>Topics</h4>
+                {#if comparisonResult.differences.topics && comparisonResult.differences.topics.changed}
+                  <div class="diff-display">
+                    {@html formatDiff(comparisonResult.differences.topics.diff)}
+                  </div>
+                {:else}
+                  <p>No changes</p>
+                {/if}
+              </div>
+            </div>
+          </div>
+        {/if}
+      {:else}
+        <p style="text-align: center;">You need at least two versions to compare. Add more versions in the Version Tracker section.</p>
+      {/if}
     </div>
 
     <!-- Recent Commits Section (Collapsible) -->
