@@ -2,7 +2,7 @@
 
 Nuggit is a web application for tracking and analyzing GitHub repositories. It provides a dashboard for monitoring repository metrics, comparing versions over time, and adding comments to repositories.
 
-<img width="800" alt="image" src="https://github.com/user-attachments/assets/9c83975c-2139-4ee6-9e7a-6cbcb687792e">
+<img width="1085" alt="image" src="https://github.com/user-attachments/assets/7541109c-d0a9-41f1-b981-f8708e55e803" />
 
 ## Features
 
