@@ -1,9 +1,8 @@
-.env
-.venv
-*.swp
-*.log
-*.html
-nuggit/nuggit.db
+/node_modules/
+/public/build/
+
+.DS_Store
+
 # node_modules should never be committed
 node_modules/
 

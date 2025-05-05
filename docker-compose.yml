@@ -1,0 +1,14 @@
+services:
+  nuggit:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8001:8001"  # Backend port
+      - "5173:5173"  # Frontend port
+    volumes:
+      - ./nuggit/.env:/app/nuggit/.env:ro  # Mount .env file
+      - ./nuggit.db:/app/nuggit.db  # Mount database file
+    restart: unless-stopped
+    env_file:
+      - ./nuggit/.env  # Use the .env file directly
