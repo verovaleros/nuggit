@@ -130,7 +130,10 @@ class RepositoryInput(BaseModel):
         Raises:
             ValueError: If neither field is set.
         """
-        if not (values.get('id') or values.get('url')):
+        #if not (values.get('id') or values.get('url')):
+        #    raise ValueError("Either 'id' or 'url' must be provided")
+        #return values
+        if not (values.id or values.url):
             raise ValueError("Either 'id' or 'url' must be provided")
         return values
 

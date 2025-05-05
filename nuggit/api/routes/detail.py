@@ -204,7 +204,12 @@ async def get_repository_detail(repo_id: str):
     Raises:
         HTTPException (404): If repository with `repo_id` does not exist.
     """
-    repo_data = await db_get_repository(repo_id)
+    # URL-decode the repository ID to handle URL-encoded slashes
+    import urllib.parse
+    decoded_repo_id = urllib.parse.unquote(repo_id)
+    logger.info(f"Looking up repository with ID: {decoded_repo_id} (original: {repo_id})")
+
+    repo_data = await db_get_repository(decoded_repo_id)
     if not repo_data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -225,8 +230,8 @@ async def get_repository_detail(repo_id: str):
     gh_client = get_gh_client()
 
     # Only fetch comments and versions initially, not commits
-    comments_task = asyncio.create_task(db_get_comments(repo_id))
-    versions_task = asyncio.create_task(db_get_versions(repo_id))
+    comments_task = asyncio.create_task(db_get_comments(decoded_repo_id))
+    versions_task = asyncio.create_task(db_get_versions(decoded_repo_id))
 
     comments, versions = await asyncio.gather(
         comments_task, versions_task, return_exceptions=True
@@ -277,12 +282,17 @@ async def update_repo_metadata(
         HTTPException (404): If the repository is not found.
         HTTPException (500): If the update fails unexpectedly.
     """
+    # URL-decode the repository ID to handle URL-encoded slashes
+    import urllib.parse
+    decoded_repo_id = urllib.parse.unquote(repo_id)
+    logger.info(f"Updating metadata for repository with ID: {decoded_repo_id} (original: {repo_id})")
+
     try:
         success = await db_update_repository_metadata(
-            repo_id, data.tags, data.notes
+            decoded_repo_id, data.tags, data.notes
         )
     except Exception as e:
-        logger.error(f"Error updating metadata for {repo_id}: {e}")
+        logger.error(f"Error updating metadata for {decoded_repo_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update metadata"
@@ -320,7 +330,12 @@ async def add_repository_comment(
         HTTPException (404): If the repository is not found.
         HTTPException (500): If the comment creation fails.
     """
-    repo = await db_get_repository(repo_id)
+    # URL-decode the repository ID to handle URL-encoded slashes
+    import urllib.parse
+    decoded_repo_id = urllib.parse.unquote(repo_id)
+    logger.info(f"Adding comment to repository with ID: {decoded_repo_id} (original: {repo_id})")
+
+    repo = await db_get_repository(decoded_repo_id)
     if not repo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -329,9 +344,9 @@ async def add_repository_comment(
 
     try:
         comment_id = await db_add_comment(
-            repo_id, comment_data.comment, comment_data.author
+            decoded_repo_id, comment_data.comment, comment_data.author
         )
-        all_comments = await db_get_comments(repo_id)
+        all_comments = await db_get_comments(decoded_repo_id)
         new = next((c for c in all_comments if c["id"] == comment_id), None)
         if not new:
             raise HTTPException(
@@ -342,7 +357,7 @@ async def add_repository_comment(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error adding comment for {repo_id}: {e}")
+        logger.error(f"Error adding comment for {decoded_repo_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to add comment"
@@ -372,7 +387,12 @@ async def get_repository_comments(
         HTTPException (404): If the repository is not found.
         HTTPException (500): If comments retrieval fails.
     """
-    repo = await db_get_repository(repo_id)
+    # URL-decode the repository ID to handle URL-encoded slashes
+    import urllib.parse
+    decoded_repo_id = urllib.parse.unquote(repo_id)
+    logger.info(f"Looking up repository for comments with ID: {decoded_repo_id} (original: {repo_id})")
+
+    repo = await db_get_repository(decoded_repo_id)
     if not repo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -380,10 +400,10 @@ async def get_repository_comments(
         )
 
     try:
-        comments = await db_get_comments(repo_id)
+        comments = await db_get_comments(decoded_repo_id)
         return [CommentResponse(**c) for c in comments[:limit]]
     except Exception as e:
-        logger.error(f"Error retrieving comments for {repo_id}: {e}")
+        logger.error(f"Error retrieving comments for {decoded_repo_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get comments"
@@ -413,7 +433,12 @@ async def get_repository_commits(
         HTTPException (404): If the repository is not found.
         HTTPException (500): If commits retrieval fails.
     """
-    repo = await db_get_repository(repo_id)
+    # URL-decode the repository ID to handle URL-encoded slashes
+    import urllib.parse
+    decoded_repo_id = urllib.parse.unquote(repo_id)
+    logger.info(f"Looking up repository with ID: {decoded_repo_id} (original: {repo_id})")
+
+    repo = await db_get_repository(decoded_repo_id)
     if not repo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -434,10 +459,10 @@ async def get_repository_commits(
     gh_client = get_gh_client()
 
     try:
-        commits = await fetch_recent_commits(gh_client, repo_id, limit=limit, offline_mode=offline_mode)
+        commits = await fetch_recent_commits(gh_client, decoded_repo_id, limit=limit, offline_mode=offline_mode)
         return commits
     except Exception as e:
-        logger.error(f"Error retrieving commits for {repo_id}: {e}")
+        logger.error(f"Error retrieving commits for {decoded_repo_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get commits"

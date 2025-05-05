@@ -298,18 +298,45 @@
 
   async function checkRepositoryExists(repoId) {
     try {
-      const encodedRepoId = encodeURIComponent(repoId);
-      const checkUrl = `http://localhost:8001/repositories/check/${encodedRepoId}`;
-      console.log('Checking if repository exists:', checkUrl);
-
-      const res = await fetch(checkUrl);
-      if (!res.ok) {
-        console.error('Error checking repository:', await res.text());
+      if (!repoId) {
+        console.error('Invalid repository ID (empty)');
         return false;
       }
 
-      const data = await res.json();
-      return data.exists;
+      // Properly encode the repository ID for the URL
+      const encodedRepoId = encodeURIComponent(repoId);
+      const checkUrl = `http://localhost:8001/repositories/check/${encodedRepoId}`;
+      console.log('Checking if repository exists:', checkUrl);
+      console.log('Repository ID being checked:', repoId);
+
+      // Set a timeout for the fetch operation
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+
+      try {
+        const res = await fetch(checkUrl, {
+          signal: controller.signal,
+          headers: {
+            'Accept': 'application/json'
+          }
+        });
+
+        clearTimeout(timeoutId); // Clear the timeout if fetch completes
+
+        if (!res.ok) {
+          console.error('Error checking repository:', await res.text());
+          return false;
+        }
+
+        const data = await res.json();
+        console.log('Repository check response:', data);
+        return data.exists;
+      } catch (fetchErr) {
+        if (fetchErr.name === 'AbortError') {
+          console.warn('Repository check timed out');
+        }
+        throw fetchErr;
+      }
     } catch (err) {
       console.error('Error checking if repository exists:', err);
       return false;
@@ -330,17 +357,25 @@
 
       console.log('Fetching commits for repository:', repoId);
 
-      // First check if the repository exists in the database
-      const exists = await checkRepositoryExists(repoId);
+      // Use the repository ID from the loaded repository data instead of the URL
+      // This ensures we're using the exact ID format stored in the database
+      const actualRepoId = repo.id;
+      console.log('Using actual repository ID from loaded data:', actualRepoId);
+
+      // First check if the repository exists in the database using the actual ID
+      const exists = await checkRepositoryExists(actualRepoId);
       if (!exists) {
         throw new Error("Repository not found in database");
       }
 
-      const encodedRepoId = encodeURIComponent(repoId);
+      // Properly encode the repository ID for the URL
+      // We need to use encodeURIComponent to handle special characters like slashes
+      const encodedRepoId = encodeURIComponent(actualRepoId);
+      console.log('Encoded repository ID:', encodedRepoId);
 
       // Set a timeout for the fetch operation
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout (increased from 5)
 
       try {
         // Log the URL we're fetching from - make sure to include trailing slash
@@ -348,7 +383,10 @@
         console.log('Fetching commits from URL:', url);
 
         const res = await fetch(url, {
-          signal: controller.signal
+          signal: controller.signal,
+          headers: {
+            'Accept': 'application/json'
+          }
         });
 
         clearTimeout(timeoutId); // Clear the timeout if fetch completes
@@ -356,12 +394,25 @@
         if (!res.ok) {
           const errorText = await res.text();
           console.error('Error response from commits API:', errorText);
-          throw new Error(errorText);
+          throw new Error(errorText || `HTTP error ${res.status}`);
         }
 
-        const commits = await res.json();
-        repo.recent_commits = commits;
-        console.log('Commits fetched successfully:', commits);
+        // Try to parse the JSON response
+        try {
+          const commits = await res.json();
+
+          // Validate that we received an array
+          if (!Array.isArray(commits)) {
+            console.error('Invalid commits response format:', commits);
+            throw new Error('Invalid response format from server');
+          }
+
+          repo.recent_commits = commits;
+          console.log('Commits fetched successfully:', commits);
+        } catch (jsonErr) {
+          console.error('Error parsing commits JSON:', jsonErr);
+          throw new Error('Invalid JSON response from server');
+        }
       } catch (fetchErr) {
         if (fetchErr.name === 'AbortError') {
           commitsError = 'Failed to load commits: Connection timed out';

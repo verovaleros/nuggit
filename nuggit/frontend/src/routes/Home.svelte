@@ -264,24 +264,73 @@
         // Determine if this is a URL or username/repo format
         const isUrl = isGitHubUrl(repoInput);
 
-        // Make the API call to add this repository
-        // For now, let's use the batch endpoint which is working
-        const res = await fetch('http://localhost:8001/repositories/batch', {
+        // Prepare the request payload
+        let payload;
+        if (isUrl) {
+          payload = { url: repoInput };
+        } else {
+          payload = { id: repoInput };
+        }
+
+        console.log(`Processing repository: ${repoInput} (${isUrl ? 'URL' : 'ID'})`);
+
+        // First try the single repository endpoint
+        try {
+          const singleRes = await fetch('http://localhost:8001/repositories/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+
+          if (singleRes.ok) {
+            const data = await singleRes.json();
+
+            // Update the processing status for this repository
+            processingRepos = processingRepos.map((repo, index) =>
+              index === i
+                ? {
+                    ...repo,
+                    status: 'success',
+                    message: '✅',
+                    name: data.repository.name,
+                    id: data.repository.id
+                  }
+                : repo
+            );
+
+            // Add to successful results
+            results.successful.push({
+              id: data.repository.id,
+              name: data.repository.name
+            });
+
+            continue; // Skip to the next repository
+          }
+
+          // If single endpoint fails, fall back to batch endpoint
+          console.log(`Single endpoint failed for ${repoInput}, trying batch endpoint`);
+        } catch (singleErr) {
+          console.error(`Error with single endpoint for ${repoInput}:`, singleErr);
+          // Continue to batch endpoint
+        }
+
+        // Fall back to the batch endpoint
+        const batchRes = await fetch('http://localhost:8001/repositories/batch', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ repositories: [repoInput] })
         });
 
-        if (!res.ok) {
-          const errText = await res.text();
+        if (!batchRes.ok) {
+          const errText = await batchRes.text();
           throw new Error(errText);
         }
 
-        const data = await res.json();
+        const batchData = await batchRes.json();
 
         // Check if the repository was added successfully
-        if (data.results.successful.length > 0) {
-          const successfulRepo = data.results.successful[0];
+        if (batchData.results.successful.length > 0) {
+          const successfulRepo = batchData.results.successful[0];
 
           // Update the processing status for this repository
           processingRepos = processingRepos.map((repo, index) =>
@@ -301,8 +350,8 @@
             id: successfulRepo.id,
             name: successfulRepo.name
           });
-        } else if (data.results.failed.length > 0) {
-          const failedRepo = data.results.failed[0];
+        } else if (batchData.results.failed.length > 0) {
+          const failedRepo = batchData.results.failed[0];
           throw new Error(failedRepo.error);
         } else {
           throw new Error("Unknown error occurred");
