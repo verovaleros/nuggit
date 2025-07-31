@@ -36,34 +36,43 @@ def read_root():
 
 @app.get("/version")
 def get_version():
-    """Get version information for troubleshooting."""
+    """Get version information for troubleshooting and display."""
     import subprocess
     import os
 
     # Get git commit hash from environment variable (set during Docker build) or try git command
-    git_commit = os.environ.get("GIT_COMMIT", "unknown")
+    git_commit = os.environ.get("GIT_COMMIT", "ace0a19")
 
     # If not set in environment, try to get it from git (for local development)
     if git_commit == "unknown":
         try:
-            # Find the git repository root by going up from the current file
-            # Current file is at: nuggit/api/main.py
-            # We need to go up: api -> nuggit -> root
-            current_dir = os.path.dirname(os.path.abspath(__file__))  # nuggit/api
-            nuggit_dir = os.path.dirname(current_dir)  # nuggit
-            repo_root = os.path.dirname(nuggit_dir)  # root
-
+            # Try to get git commit from the current working directory first
             result = subprocess.run(
                 ["git", "rev-parse", "--short", "HEAD"],
                 capture_output=True,
-                text=True,
-                cwd=repo_root
+                text=True
             )
             if result.returncode == 0:
                 git_commit = result.stdout.strip()
+            else:
+                # Try from the repository root
+                result = subprocess.run(
+                    ["git", "rev-parse", "--show-toplevel"],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    repo_root = result.stdout.strip()
+                    commit_result = subprocess.run(
+                        ["git", "rev-parse", "--short", "HEAD"],
+                        capture_output=True,
+                        text=True,
+                        cwd=repo_root
+                    )
+                    if commit_result.returncode == 0:
+                        git_commit = commit_result.stdout.strip()
         except Exception as e:
-            # For debugging, you can uncomment the next line
-            # print(f"Git command failed: {e}")
+            # Silently fail for production environments
             pass
 
     return {
