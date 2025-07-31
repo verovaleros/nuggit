@@ -29,3 +29,41 @@ app.include_router(versions.router,     prefix="/api",          tags=["version c
 @app.get("/")
 def read_root():
     return {"message": "Welcome to the Nuggit API"}
+
+@app.get("/version")
+def get_version():
+    """Get version information for troubleshooting."""
+    import subprocess
+    import os
+
+    # Get git commit hash from environment variable (set during Docker build) or try git command
+    git_commit = os.environ.get("GIT_COMMIT", "unknown")
+
+    # If not set in environment, try to get it from git (for local development)
+    if git_commit == "unknown":
+        try:
+            # Find the git repository root by going up from the current file
+            # Current file is at: nuggit/api/main.py
+            # We need to go up: api -> nuggit -> root
+            current_dir = os.path.dirname(os.path.abspath(__file__))  # nuggit/api
+            nuggit_dir = os.path.dirname(current_dir)  # nuggit
+            repo_root = os.path.dirname(nuggit_dir)  # root
+
+            result = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                capture_output=True,
+                text=True,
+                cwd=repo_root
+            )
+            if result.returncode == 0:
+                git_commit = result.stdout.strip()
+        except Exception as e:
+            # For debugging, you can uncomment the next line
+            # print(f"Git command failed: {e}")
+            pass
+
+    return {
+        "api_version": "0.1.0",
+        "git_commit": git_commit,
+        "app_name": "Nuggit"
+    }

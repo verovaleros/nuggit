@@ -34,6 +34,9 @@
   let addResults = null;
   let processingRepos = [];
 
+  // Version information for troubleshooting
+  let versionInfo = null;
+
   // Tags and stats
   $: allTags = Array.from(
     new Set(
@@ -73,6 +76,15 @@
       currentDisplayCount = pageSize;
     } catch (error) {
       console.error('Error loading repositories:', error);
+    }
+
+    // Fetch version information for troubleshooting
+    try {
+      const versionRes = await fetch('http://localhost:8001/version');
+      versionInfo = await versionRes.json();
+    } catch (error) {
+      console.error('Error loading version info:', error);
+      versionInfo = { api_version: 'unknown', git_commit: 'unknown', app_name: 'Nuggit' };
     }
   });
 
@@ -801,6 +813,43 @@
     from { opacity: 0; }
     to { opacity: 1; }
   }
+
+  /* Version Footer Styles */
+  .version-footer {
+    margin-top: 3rem;
+    padding: 1rem 0;
+    border-top: 1px solid #e5e7eb;
+    text-align: center;
+  }
+
+  .version-info {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: #6b7280;
+  }
+
+  .app-name {
+    font-weight: 600;
+    color: #374151;
+  }
+
+  .version-details {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    background-color: #f3f4f6;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+  }
+
+  @media (max-width: 768px) {
+    .version-info {
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+  }
 </style>
 
 <div class="container">
@@ -953,5 +1002,20 @@ username3/repo3"
         {/if}
       </div>
     </div>
+  {/if}
+
+  <!-- Version Footer for Troubleshooting -->
+  {#if versionInfo}
+    <footer class="version-footer">
+      <div class="version-info">
+        <span class="app-name">{versionInfo.app_name}</span>
+        <span class="version-details">
+          v{versionInfo.api_version}
+          {#if versionInfo.git_commit !== 'unknown'}
+            • {versionInfo.git_commit}
+          {/if}
+        </span>
+      </div>
+    </footer>
   {/if}
 </div>
