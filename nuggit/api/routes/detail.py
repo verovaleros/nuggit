@@ -163,7 +163,7 @@ async def fetch_recent_commits(
                 lambda: get_recent_commits(
                     gh_client.get_repo(repo_id),
                     limit=limit,
-                    max_retries=0  # No retries to avoid delays
+                    max_retries=1  # Allow 1 retry for reliability
                 )
             ),
             timeout=timeout
