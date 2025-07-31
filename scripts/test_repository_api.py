@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO,
                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # API base URL
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = "http://localhost:8001"
 
 def test_check_repository(repo_id):
     """Test the check repository endpoint."""

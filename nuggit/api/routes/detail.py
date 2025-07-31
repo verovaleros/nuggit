@@ -179,38 +179,43 @@ async def fetch_recent_commits(
     return []
 
 
+# Test endpoints removed - routing issue fixed
+
 @router.get(
-    "/{repo_id:path}",
-    response_model=RepositoryDetail,
-    summary="Get a single repository by ID",
+    "/{repo_id:path}/commits/",
+    response_model=List[CommitSchema],
+    summary="Get recent commits for a repository",
 )
-async def get_repository_detail(repo_id: str):
+async def get_repository_commits(
+    repo_id: str,
+    limit: int = Query(10, description="Maximum number of commits to return"),
+):
     """
-    Retrieve full repository info, including recent commits, comments, and versions.
+    Get recent commits for a repository.
 
     Args:
-        repo_id (str): Unique owner/repo identifier (e.g., "octocat/Hello-World").
+        repo_id (str): The ID of the repository.
+        limit (int, optional): Maximum number of commits to return. Defaults to 10.
 
     Returns:
-        RepositoryDetail: A Pydantic model containing:
-            - id: repository ID
-            - name: repository name
-            - tags: list of tags
-            - notes: optional notes
-            - recent_commits: list of latest commits (limit configurable)
-            - comments: list of CommentResponse
-            - versions: list of VersionSchema
+        List[CommitSchema]: A list of recent commits.
 
     Raises:
-        HTTPException (404): If repository with `repo_id` does not exist.
+        HTTPException (404): If the repository is not found.
+        HTTPException (500): If commits retrieval fails.
     """
     # URL-decode the repository ID to handle URL-encoded slashes
     import urllib.parse
     decoded_repo_id = urllib.parse.unquote(repo_id)
-    logger.info(f"Looking up repository with ID: {decoded_repo_id} (original: {repo_id})")
+    logger.info(f"COMMITS ENDPOINT: Looking up repository with ID: {decoded_repo_id} (original: {repo_id})")
 
-    repo_data = await db_get_repository(decoded_repo_id)
-    if not repo_data:
+    repo = await db_get_repository(decoded_repo_id)
+    logger.info(f"COMMITS ENDPOINT: Repository lookup result: {repo is not None}")
+    if repo:
+        logger.info(f"COMMITS ENDPOINT: Found repository: {repo['id']}")
+
+    if not repo:
+        logger.error(f"COMMITS ENDPOINT: Repository not found for ID: {decoded_repo_id}")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Repository not found"
@@ -229,34 +234,18 @@ async def get_repository_detail(repo_id: str):
 
     gh_client = get_gh_client()
 
-    # Only fetch comments and versions initially, not commits
-    comments_task = asyncio.create_task(db_get_comments(decoded_repo_id))
-    versions_task = asyncio.create_task(db_get_versions(decoded_repo_id))
+    try:
+        commits = await fetch_recent_commits(gh_client, decoded_repo_id, limit=limit, offline_mode=offline_mode)
+        return commits
+    except Exception as e:
+        logger.error(f"Error retrieving commits for {decoded_repo_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get commits"
+        )
 
-    comments, versions = await asyncio.gather(
-        comments_task, versions_task, return_exceptions=True
-    )
 
-    # Initialize empty commits list - will be fetched separately when needed
-    recent_commits = []
-
-    if isinstance(comments, Exception):
-        logger.error(f"Error fetching comments for {repo_id}: {comments}")
-        comments = []
-    if isinstance(versions, Exception):
-        logger.error(f"Error fetching versions for {repo_id}: {versions}")
-        versions = []
-
-    # Convert tags from comma-separated string to list
-    if "tags" in repo_data and isinstance(repo_data["tags"], str):
-        repo_data["tags"] = [tag.strip() for tag in repo_data["tags"].split(",")] if repo_data["tags"] else []
-
-    return RepositoryDetail(
-        **repo_data,
-        recent_commits=recent_commits,
-        comments=comments,
-        versions=versions,
-    )
+# MOVED TO END OF FILE TO AVOID CATCHING SPECIFIC ROUTES
 
 
 @router.put(
@@ -410,36 +399,39 @@ async def get_repository_comments(
         )
 
 
+# GENERAL ROUTE MOVED TO END TO AVOID CATCHING SPECIFIC ROUTES
 @router.get(
-    "/{repo_id:path}/commits/",
-    response_model=List[CommitSchema],
-    summary="Get recent commits for a repository",
+    "/{repo_id:path}",
+    response_model=RepositoryDetail,
+    summary="Get a single repository by ID",
 )
-async def get_repository_commits(
-    repo_id: str,
-    limit: int = Query(10, description="Maximum number of commits to return"),
-):
+async def get_repository_detail(repo_id: str):
     """
-    Get recent commits for a repository.
+    Retrieve full repository info, including recent commits, comments, and versions.
 
     Args:
-        repo_id (str): The ID of the repository.
-        limit (int, optional): Maximum number of commits to return. Defaults to 10.
+        repo_id (str): Unique owner/repo identifier (e.g., "octocat/Hello-World").
 
     Returns:
-        List[CommitSchema]: A list of recent commits.
+        RepositoryDetail: A Pydantic model containing:
+            - id: repository ID
+            - name: repository name
+            - tags: list of tags
+            - notes: optional notes
+            - recent_commits: list of latest commits (limit configurable)
+            - comments: list of CommentResponse
+            - versions: list of VersionSchema
 
     Raises:
-        HTTPException (404): If the repository is not found.
-        HTTPException (500): If commits retrieval fails.
+        HTTPException (404): If repository with `repo_id` does not exist.
     """
     # URL-decode the repository ID to handle URL-encoded slashes
     import urllib.parse
     decoded_repo_id = urllib.parse.unquote(repo_id)
     logger.info(f"Looking up repository with ID: {decoded_repo_id} (original: {repo_id})")
 
-    repo = await db_get_repository(decoded_repo_id)
-    if not repo:
+    repo_data = await db_get_repository(decoded_repo_id)
+    if not repo_data:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Repository not found"
@@ -458,12 +450,32 @@ async def get_repository_commits(
 
     gh_client = get_gh_client()
 
-    try:
-        commits = await fetch_recent_commits(gh_client, decoded_repo_id, limit=limit, offline_mode=offline_mode)
-        return commits
-    except Exception as e:
-        logger.error(f"Error retrieving commits for {decoded_repo_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get commits"
-        )
+    # Only fetch comments and versions initially, not commits
+    comments_task = asyncio.create_task(db_get_comments(decoded_repo_id))
+    versions_task = asyncio.create_task(db_get_versions(decoded_repo_id))
+
+    comments, versions = await asyncio.gather(
+        comments_task, versions_task, return_exceptions=True
+    )
+
+    # Initialize empty commits list - will be fetched separately when needed
+    recent_commits = []
+
+    if isinstance(comments, Exception):
+        logger.error(f"Error fetching comments for {repo_id}: {comments}")
+        comments = []
+    if isinstance(versions, Exception):
+        logger.error(f"Error fetching versions for {repo_id}: {versions}")
+        versions = []
+
+    # Convert tags from comma-separated string to list
+    if "tags" in repo_data and isinstance(repo_data["tags"], str):
+        repo_data["tags"] = [tag.strip() for tag in repo_data["tags"].split(",")] if repo_data["tags"] else []
+
+    return RepositoryDetail(
+        **repo_data,
+        recent_commits=recent_commits,
+        comments=comments,
+        versions=versions,
+    )
+

@@ -20,9 +20,13 @@ app.add_middleware(
 )
 
 # Include routers
+# Note: Order matters! More specific routes should come before general ones
+# repositories.router has the root "/" route and specific routes like "/check/{repo_id:path}"
 app.include_router(repositories.router, prefix="/repositories", tags=["repositories"])
-app.include_router(detail.router,       prefix="/repositories", tags=["repository detail"])
+# versions.router has specific routes like "/{repo_id:path}/versions"
 app.include_router(versions.router,     prefix="/repositories", tags=["versions"])
+# detail.router has the general "/{repo_id:path}" route and should come last
+app.include_router(detail.router,       prefix="/repositories", tags=["repository detail"])
 # version-comparison endpoints share the same router
 app.include_router(versions.router,     prefix="/api",          tags=["version comparison"])
 

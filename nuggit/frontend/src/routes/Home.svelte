@@ -24,7 +24,7 @@
   let searchTerm = '';
 
   // Sorting options
-  let sortField = 'last_synced'; // Default sort by last_synced (most recent first)
+  let sortField = 'last_commit'; // Default sort by last_commit (most recent first)
   let sortOrder = 'desc'; // Default sort order is descending
 
   // Repository adding
@@ -886,7 +886,7 @@
               <th class={sortField === 'description' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('description')}>Description</th>
               <th class={sortField === 'license' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('license')}>License</th>
               <th class={sortField === 'stars' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('stars')}>Stars</th>
-              <th class={sortField === 'last_synced' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('last_synced')}>Updated</th>
+              <th class={sortField === 'last_commit' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('last_commit')}>Last Commit</th>
             </tr>
           </thead>
           <tbody>
@@ -896,7 +896,7 @@
                 <td>{repo.description}</td>
                 <td>{repo.license}</td>
                 <td>{repo.stars}</td>
-                <td>{formatDateWithDaysAgo(repo.last_synced)}</td>
+                <td>{formatDateWithDaysAgo(repo.last_commit)}</td>
               </tr>
             {/each}
           </tbody>
