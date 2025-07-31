@@ -1691,6 +1691,44 @@
     color: #4b5563;
   }
 
+  /* Star Chart Styles */
+  .star-chart-container {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+  }
+
+  .star-chart-container h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    color: #1f2937;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 0.5rem;
+  }
+
+  .star-chart-wrapper {
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #e5e7eb;
+  }
+
+  .star-chart-wrapper img {
+    display: block;
+    border: none;
+    border-radius: 8px;
+    max-width: 100%;
+    height: auto;
+  }
+
+  @media (max-width: 768px) {
+    .star-chart-wrapper img {
+      width: 100% !important;
+      height: auto !important;
+    }
+  }
+
   .commits-error {
     padding: 1rem;
     text-align: center;
@@ -1856,6 +1894,19 @@
           {updateStatus}
         </div>
       {/if}
+    </div>
+
+    <!-- Star Growth Chart -->
+    <div class="star-chart-container">
+      <h3>⭐ Star Growth History</h3>
+      <div class="star-chart-wrapper">
+        <img
+          src="https://api.star-history.com/svg?repos={repo.id}&type=Date"
+          alt="Star History Chart for {repo.id}"
+          style="width: 100%; height: auto; max-width: 100%;"
+          loading="lazy"
+        />
+      </div>
     </div>
 
     {#if showDeleteConfirm}
