@@ -1,5 +1,6 @@
 <script>
   import { onMount } from 'svelte';
+  import TagInput from '../components/TagInput.svelte';
 
   let currentTab = 'repos';
 
@@ -33,6 +34,7 @@
   let isAdding = false;
   let addResults = null;
   let processingRepos = [];
+  let sharedTags = ''; // Tags to apply to all repositories in batch
 
   // Version information for troubleshooting
   let versionInfo = null;
@@ -390,6 +392,171 @@
     return results;
   }
 
+  // Helper function to process repositories using batch endpoint with shared tags
+  async function processBatchWithTags(repos, tags) {
+    const results = { successful: [], failed: [] };
+
+    // Update all repos to processing status
+    processingRepos = processingRepos.map(repo => ({
+      ...repo,
+      status: 'processing',
+      message: '🔄'
+    }));
+
+    try {
+      // Try batch endpoint first
+      const batchRes = await fetch('http://localhost:8001/repositories/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repositories: repos,
+          tags: tags
+        })
+      });
+
+      if (batchRes.ok) {
+        const batchData = await batchRes.json();
+
+        // Update processing status based on results
+        processingRepos = processingRepos.map((repo, index) => {
+          const successful = batchData.results.successful.find(s => s.id === repo.id || repos[index] === repo.id);
+          const failed = batchData.results.failed.find(f => f.id === repo.id || repos[index] === repo.id);
+
+          if (successful) {
+            return {
+              ...repo,
+              status: 'success',
+              message: '✅',
+              name: successful.name || repo.id
+            };
+          } else if (failed) {
+            return {
+              ...repo,
+              status: 'error',
+              message: '❌',
+              errorDetails: failed.error
+            };
+          } else {
+            return repo;
+          }
+        });
+
+        return batchData.results;
+      } else {
+        // If batch endpoint fails, fall back to individual processing with tag application
+        console.log('Batch endpoint failed, falling back to individual processing with tags');
+        return await processRepositoriesWithTags(repos, tags);
+      }
+    } catch (error) {
+      console.log('Batch endpoint error, falling back to individual processing with tags:', error);
+      return await processRepositoriesWithTags(repos, tags);
+    }
+  }
+
+  // Helper function to process repositories individually and then apply tags
+  async function processRepositoriesWithTags(repos, tags) {
+    const results = { successful: [], failed: [] };
+
+    for (let i = 0; i < repos.length; i++) {
+      const repoInput = repos[i];
+
+      // Update the status to show we're processing this repository
+      processingRepos = processingRepos.map((repo, index) =>
+        index === i
+          ? { ...repo, status: 'processing', message: '🔄' }
+          : repo
+      );
+
+      try {
+        // Determine if this is a URL or username/repo format
+        const isUrl = isGitHubUrl(repoInput);
+
+        // Prepare the request payload
+        let payload;
+        if (isUrl) {
+          payload = { url: repoInput };
+        } else {
+          payload = { id: repoInput };
+        }
+
+        console.log(`Processing repository: ${repoInput} (${isUrl ? 'URL' : 'ID'})`);
+
+        // Add the repository first
+        const singleRes = await fetch('http://localhost:8001/repositories/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (singleRes.ok) {
+          const data = await singleRes.json();
+          const repoId = data.repository.id;
+
+          // Now apply the tags if provided
+          if (tags) {
+            try {
+              const tagRes = await fetch(`http://localhost:8001/repositories/${encodeURIComponent(repoId)}/metadata/`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  tags: tags,
+                  notes: data.repository.notes || ''
+                })
+              });
+
+              if (!tagRes.ok) {
+                console.warn(`Failed to apply tags to ${repoId}`);
+              }
+            } catch (tagError) {
+              console.warn(`Error applying tags to ${repoId}:`, tagError);
+            }
+          }
+
+          // Update the processing status for this repository
+          processingRepos = processingRepos.map((repo, index) =>
+            index === i
+              ? {
+                  ...repo,
+                  status: 'success',
+                  message: '✅',
+                  name: data.repository.name,
+                  id: data.repository.id
+                }
+              : repo
+          );
+
+          // Add to successful results
+          results.successful.push({
+            id: data.repository.id,
+            name: data.repository.name
+          });
+        } else {
+          throw new Error(`Failed to add repository: ${await singleRes.text()}`);
+        }
+      } catch (error) {
+        // Update the processing status for this repository
+        processingRepos = processingRepos.map((repo, index) =>
+          index === i
+            ? {
+                ...repo,
+                status: 'error',
+                message: '❌',
+                errorDetails: error.message
+              }
+            : repo
+        );
+
+        // Add to failed results
+        results.failed.push({
+          id: repoInput,
+          error: error.message
+        });
+      }
+    }
+
+    return results;
+  }
+
   async function addRepositories() {
     if (!repoIds.trim()) {
       addStatus = 'Please enter at least one repository ID.';
@@ -427,8 +594,15 @@
       // Update UI to show we're starting
       addStatus = `Processing ${repos.length} repositories...`;
 
-      // Process repositories one by one with progressive feedback
-      const results = await processRepositories(repos);
+      let results;
+
+      // If shared tags are provided, use the batch endpoint directly
+      if (sharedTags.trim()) {
+        results = await processBatchWithTags(repos, sharedTags.trim());
+      } else {
+        // Process repositories one by one with progressive feedback
+        results = await processRepositories(repos);
+      }
 
       // Create a results object similar to what the batch API returns
       addResults = {
@@ -438,9 +612,10 @@
 
       addStatus = addResults.message;
 
-      // If all repositories were added successfully, clear the input
+      // If all repositories were added successfully, clear the inputs
       if (results.failed.length === 0) {
         repoIds = '';
+        sharedTags = '';
       }
 
       // Refresh the repository list
@@ -677,6 +852,20 @@
     border-radius: 6px;
     border: 1px solid #ccc;
     resize: vertical;
+  }
+
+  .shared-tags-section {
+    margin-top: 1rem;
+    max-width: 500px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .shared-tags-section label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    color: #374151;
   }
 
   .batch-results {
@@ -954,6 +1143,13 @@ https://github.com/username2/repo2
 username3/repo3"
           bind:value={repoIds}
         ></textarea>
+
+        <!-- Shared Tags Section -->
+        <div class="shared-tags-section">
+          <label for="shared-tags">Tags to apply to all repositories (optional):</label>
+          <TagInput bind:tags={sharedTags} />
+        </div>
+
         <div style="margin-top: 1rem;">
           <button class="add-repo-button" on:click={addRepositories} disabled={isAdding}>
             {isAdding ? 'Adding...' : 'Add Repositories'}

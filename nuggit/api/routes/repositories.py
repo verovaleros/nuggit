@@ -146,6 +146,7 @@ class RepositoryResponse(BaseModel):
 class BatchRepositoryInput(BaseModel):
     repositories: List[str] = Field(..., description="List of repository identifiers ('owner/name').")
     token: Optional[str] = Field(None, description="GitHub access token to use for batch operations.")
+    tags: Optional[str] = Field(None, description="Comma-separated tags to apply to all repositories in the batch.")
 
     @field_validator('repositories')
     def non_empty(cls, v: List[str]) -> List[str]:
@@ -319,15 +320,43 @@ def batch_import(batch: BatchRepositoryInput):
                 raise ValueError("Invalid format, expected 'owner/name' or GitHub URL")
 
             existing = get_repository(repo_id)
-            # Use 0 retries to avoid unnecessary delays
-            repo_info = retry_github(
-                get_repo_info,
-                owner,
-                name,
-                batch.token,
-                0,
-                preserve={"tags": existing.get("tags"), "notes": existing.get("notes")} if existing else None,
-            )
+            # Use 1 retry to handle transient issues
+            preserve_data = None
+            if existing:
+                preserve_data = {"tags": existing.get("tags"), "notes": existing.get("notes")}
+
+            # Use the global token if batch.token is None
+            token_to_use = batch.token or get_token()
+            logging.info(f"Processing {repo_id} with token: {'Yes' if token_to_use else 'No'}")
+
+            try:
+                repo_info = retry_github(
+                    get_repo_info,
+                    owner,
+                    name,
+                    token_to_use,
+                    3,  # Use more retries for batch operations
+                    preserve=preserve_data,
+                )
+            except HTTPException as e:
+                logging.error(f"HTTPException for {repo_id}: {e.detail}")
+                raise e
+            except Exception as e:
+                logging.error(f"Unexpected error for {repo_id}: {e}")
+                raise e
+
+            # Apply shared tags if provided
+            if batch.tags:
+                existing_tags = repo_info.get("tags", "")
+                if existing_tags:
+                    # Merge existing tags with new tags, avoiding duplicates
+                    existing_tag_list = [tag.strip() for tag in existing_tags.split(",") if tag.strip()]
+                    new_tag_list = [tag.strip() for tag in batch.tags.split(",") if tag.strip()]
+                    combined_tags = list(dict.fromkeys(existing_tag_list + new_tag_list))  # Remove duplicates while preserving order
+                    repo_info["tags"] = ",".join(combined_tags)
+                else:
+                    repo_info["tags"] = batch.tags
+
             insert_or_update_repo(repo_info)
             # If this is an update (not a new repo), create a version
             if existing:
