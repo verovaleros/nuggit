@@ -35,6 +35,14 @@ except ImportError:
     LOGGING_UTILITIES_AVAILABLE = False
     logger.warning("Logging utilities not available")
 
+# Import backup utilities
+try:
+    from nuggit.util.backup import create_backup, list_backups, auto_backup, verify_backup
+    BACKUP_UTILITIES_AVAILABLE = True
+except ImportError:
+    BACKUP_UTILITIES_AVAILABLE = False
+    logger.warning("Backup utilities not available")
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -525,6 +533,95 @@ async def change_log_level(level: str):
     except Exception as e:
         logger.error(f"Log level change failed: {e}")
         raise internal_server_error("Failed to change log level")
+
+
+@router.post("/health/backup", summary="Create database backup")
+async def create_database_backup():
+    """
+    Create a backup of the database.
+
+    Returns:
+        dict: Backup creation result
+
+    Raises:
+        HTTPException: If backup creation fails
+    """
+    if not BACKUP_UTILITIES_AVAILABLE:
+        raise internal_server_error("Backup utilities not available")
+
+    try:
+        backup_path = create_backup()
+
+        return {
+            "success": True,
+            "backup_path": backup_path,
+            "message": "Database backup created successfully",
+            "timestamp": utc_now_iso()
+        }
+
+    except Exception as e:
+        logger.error(f"Database backup creation failed: {e}")
+        raise internal_server_error("Failed to create database backup")
+
+
+@router.get("/health/backups", summary="List database backups")
+async def list_database_backups():
+    """
+    List all available database backups.
+
+    Returns:
+        dict: List of available backups
+
+    Raises:
+        HTTPException: If backup listing fails
+    """
+    if not BACKUP_UTILITIES_AVAILABLE:
+        raise internal_server_error("Backup utilities not available")
+
+    try:
+        backups = list_backups()
+
+        return {
+            "backups": backups,
+            "total_backups": len(backups),
+            "timestamp": utc_now_iso()
+        }
+
+    except Exception as e:
+        logger.error(f"Backup listing failed: {e}")
+        raise internal_server_error("Failed to list database backups")
+
+
+@router.post("/health/backup/auto", summary="Create automatic backup")
+async def create_auto_backup():
+    """
+    Create an automatic backup with cleanup of old backups.
+
+    Returns:
+        dict: Auto backup creation result
+
+    Raises:
+        HTTPException: If auto backup creation fails
+    """
+    if not BACKUP_UTILITIES_AVAILABLE:
+        raise internal_server_error("Backup utilities not available")
+
+    try:
+        backup_path = auto_backup()
+
+        if backup_path:
+            return {
+                "success": True,
+                "backup_path": backup_path,
+                "message": "Automatic backup created successfully",
+                "timestamp": utc_now_iso()
+            }
+        else:
+            raise internal_server_error("Auto backup creation failed")
+
+    except Exception as e:
+        logger.error(f"Auto backup creation failed: {e}")
+        raise internal_server_error("Failed to create automatic backup")
 
 
 @router.get("/health/ping", summary="Simple ping check")
