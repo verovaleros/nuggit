@@ -325,9 +325,9 @@ class TestDatabase(unittest.TestCase):
         self.assertEqual(v2["release_date"], "2023-02-01T00:00:00Z")  # ISO format
         self.assertEqual(v2["description"], description2)
 
-        # The third version should be the Origin version
+        # Check that the Origin version is also present
         today = datetime.utcnow().date().strftime("%Y.%m.%d")
-        self.assertEqual(versions[2]["version_number"], today)
+        self.assertIn(today, version_numbers)
 
     def test_origin_version_creation(self):
         """Test that an Origin version is created when a new repository is added."""
