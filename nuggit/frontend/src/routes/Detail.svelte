@@ -1098,9 +1098,6 @@
   }
 
   /* Comments styles */
-  .comments-section {
-    margin-top: 2rem;
-  }
 
   .comments-list {
     margin-top: 1rem;
@@ -1177,16 +1174,13 @@
     padding: 0.5rem 0.75rem;
   }
 
-  .comment-status, .version-status {
+  .comment-status {
     margin-top: 0.5rem;
     text-align: center;
     font-style: italic;
   }
 
   /* Version tracker styles */
-  .versions-section {
-    margin-top: 2rem;
-  }
 
   .versions-list {
     margin-top: 1rem;
@@ -1306,37 +1300,6 @@
   }
 
   /* Version comparison styles */
-  .comparison-container {
-    margin-top: 1.5rem;
-    background-color: white;
-    border-radius: 8px;
-    padding: 1.5rem;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    border: 1px solid #e5e7eb;
-  }
-
-  .comparison-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1.5rem;
-    padding-bottom: 0.75rem;
-    border-bottom: 1px solid #e5e7eb;
-  }
-
-  .comparison-header h3 {
-    margin: 0;
-    font-size: 1.2rem;
-    color: #1f2937;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .comparison-header button {
-    padding: 0.4rem 0.8rem;
-    font-size: 0.9rem;
-  }
 
   .comparison-selectors {
     display: grid;
@@ -1379,17 +1342,7 @@
     margin-top: 1.5rem;
   }
 
-  .comparison-section {
-    margin-bottom: 2rem;
-  }
 
-  .comparison-section h3 {
-    font-size: 1.2rem;
-    color: #1f2937;
-    margin-bottom: 1rem;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid #e5e7eb;
-  }
 
   .comparison-grid {
     display: grid;
@@ -1425,23 +1378,7 @@
     line-height: 1.5;
   }
 
-  .diff-line-added {
-    color: #16a34a;
-    background-color: #dcfce7;
-    display: block;
-    padding: 0.1rem 0.3rem;
-    margin: 0.1rem 0;
-    border-radius: 3px;
-  }
 
-  .diff-line-removed {
-    color: #dc2626;
-    background-color: #fee2e2;
-    display: block;
-    padding: 0.1rem 0.3rem;
-    margin: 0.1rem 0;
-    border-radius: 3px;
-  }
 
   /* Metric comparison styles */
   .metric-card {
@@ -1469,7 +1406,7 @@
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   }
 
-  .old-value, .new-value, .value {
+  .old-value, .new-value {
     font-weight: bold;
     font-size: 1.1rem;
     padding: 0.25rem 0.5rem;
@@ -1522,13 +1459,7 @@
     font-weight: bold;
   }
 
-  .text-change {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    padding: 0.75rem;
-  }
+
 
   .comparison-error {
     color: #dc2626;
@@ -1558,13 +1489,7 @@
     background-color: #4338ca;
   }
 
-  .close-comparison-button {
-    background-color: #6b7280;
-  }
 
-  .close-comparison-button:hover {
-    background-color: #4b5563;
-  }
 
   /* Collapsible section styles */
   .section-header {
