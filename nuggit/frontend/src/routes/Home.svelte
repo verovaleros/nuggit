@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import TagInput from '../components/TagInput.svelte';
 
   let currentTab = 'repos';
@@ -12,6 +12,10 @@
   onMount(() => {
     parseHashTab();
     window.addEventListener('hashchange', parseHashTab);
+  });
+
+  onDestroy(() => {
+    window.removeEventListener('hashchange', parseHashTab);
   });
 
   function switchTab(tab) {

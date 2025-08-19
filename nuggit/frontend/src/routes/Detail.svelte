@@ -1,5 +1,5 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import TagInput from '../components/TagInput.svelte';
 
   let repoId = null;
@@ -49,6 +49,30 @@
   let comparisonError = null;
   let loadingComparison = false;
 
+  // Cleanup tracking for memory leak prevention
+  let activeTimeouts = new Set();
+  let activeAbortControllers = new Set();
+
+  // Helper functions for cleanup
+  function createTimeout(callback, delay) {
+    const timeoutId = setTimeout(() => {
+      activeTimeouts.delete(timeoutId);
+      callback();
+    }, delay);
+    activeTimeouts.add(timeoutId);
+    return timeoutId;
+  }
+
+  function createAbortController() {
+    const controller = new AbortController();
+    activeAbortControllers.add(controller);
+    return controller;
+  }
+
+  function clearAbortController(controller) {
+    activeAbortControllers.delete(controller);
+  }
+
   onMount(async () => {
     const hash = window.location.hash;
     const parts = hash.split('/');
@@ -67,8 +91,8 @@
       const encodedRepoId = encodeURIComponent(repoId);
 
       // Set a timeout for the fetch operation to handle offline mode gracefully
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      const controller = createAbortController();
+      const timeoutId = createTimeout(() => controller.abort(), 5000); // 5 second timeout
 
       try {
         // Fetch repository details
@@ -77,6 +101,8 @@
         });
 
         clearTimeout(timeoutId); // Clear the timeout if fetch completes
+        activeTimeouts.delete(timeoutId);
+        clearAbortController(controller);
 
         if (!res.ok) {
           throw new Error(await res.text());
@@ -157,7 +183,7 @@
       saveStatus = '✅ Saved!';
 
       // Clear the status after 3 seconds
-      setTimeout(() => {
+      createTimeout(() => {
         saveStatus = '';
       }, 3000);
     } catch (err) {
@@ -173,8 +199,8 @@
       const encodedRepoId = encodeURIComponent(repoId);
 
       // Set a timeout for the fetch operation
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      const controller = createAbortController();
+      const timeoutId = createTimeout(() => controller.abort(), 5000); // 5 second timeout
 
       try {
         const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`, {
@@ -183,6 +209,8 @@
         });
 
         clearTimeout(timeoutId); // Clear the timeout if fetch completes
+        activeTimeouts.delete(timeoutId);
+        clearAbortController(controller);
 
         if (!res.ok) {
           throw new Error(await res.text());
@@ -235,7 +263,7 @@
         updateStatus = '✅ Repository updated!';
 
         // Clear the status after 1 second
-        setTimeout(() => {
+        createTimeout(() => {
           updateStatus = '';
         }, 1000);
       } catch (detailErr) {
@@ -324,8 +352,8 @@
       console.log('Repository ID being checked:', repoId);
 
       // Set a timeout for the fetch operation
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      const controller = createAbortController();
+      const timeoutId = createTimeout(() => controller.abort(), 5000); // 5 second timeout
 
       try {
         const res = await fetch(checkUrl, {
@@ -336,6 +364,8 @@
         });
 
         clearTimeout(timeoutId); // Clear the timeout if fetch completes
+        activeTimeouts.delete(timeoutId);
+        clearAbortController(controller);
 
         if (!res.ok) {
           console.error('Error checking repository:', await res.text());
@@ -388,8 +418,8 @@
       console.log('Encoded repository ID:', encodedRepoId);
 
       // Set a timeout for the fetch operation
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout (increased from 5)
+      const controller = createAbortController();
+      const timeoutId = createTimeout(() => controller.abort(), 10000); // 10 second timeout (increased from 5)
 
       try {
         // Log the URL we're fetching from - make sure to include trailing slash
@@ -404,6 +434,8 @@
         });
 
         clearTimeout(timeoutId); // Clear the timeout if fetch completes
+        activeTimeouts.delete(timeoutId);
+        clearAbortController(controller);
 
         if (!res.ok) {
           const errorText = await res.text();
@@ -739,7 +771,7 @@
       versionStatus = '✅ Version added!';
 
       // Clear the status after 3 seconds
-      setTimeout(() => {
+      createTimeout(() => {
         versionStatus = '';
       }, 3000);
     } catch (err) {
@@ -789,7 +821,7 @@
       commentStatus = '✅ Comment added!';
 
       // Clear the status after 3 seconds
-      setTimeout(() => {
+      createTimeout(() => {
         commentStatus = '';
       }, 3000);
     } catch (err) {
@@ -799,6 +831,20 @@
       addingComment = false;
     }
   }
+
+  onDestroy(() => {
+    // Clear all active timeouts
+    activeTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
+    activeTimeouts.clear();
+
+    // Abort all active controllers
+    activeAbortControllers.forEach(controller => {
+      if (!controller.signal.aborted) {
+        controller.abort();
+      }
+    });
+    activeAbortControllers.clear();
+  });
 </script>
 
 <style>
