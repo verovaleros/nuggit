@@ -1,6 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import TagInput from '../components/TagInput.svelte';
+  import ErrorBoundary from '../components/ErrorBoundary.svelte';
 
   let currentTab = 'repos';
 
@@ -1041,8 +1042,9 @@
   }
 </style>
 
-<div class="container">
-  <h1>🧠 Nuggit Dashboard</h1>
+<ErrorBoundary>
+  <div class="container">
+    <h1>🧠 Nuggit Dashboard</h1>
 
   <nav class="tabs">
     <button class:active={currentTab === 'repos'} on:click={() => switchTab('repos')}>🧠 Repos</button>
@@ -1216,4 +1218,5 @@ username3/repo3"
       </div>
     </footer>
   {/if}
-</div>
+  </div>
+</ErrorBoundary>

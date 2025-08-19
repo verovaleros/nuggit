@@ -1,6 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import TagInput from '../components/TagInput.svelte';
+  import ErrorBoundary from '../components/ErrorBoundary.svelte';
 
   let repoId = null;
   let repo = null;
@@ -1747,8 +1748,9 @@
   }
 </style>
 
-<div class="container">
-  <div class="nav-back">
+<ErrorBoundary>
+  <div class="container">
+    <div class="nav-back">
     <button on:click={() => (window.location.hash = '')}>
       <span>&larr;</span> Back to Home
     </button>
@@ -2396,4 +2398,5 @@
       {/if}
     </div>
   {/if}
-</div>
+  </div>
+</ErrorBoundary>
