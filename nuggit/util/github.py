@@ -24,6 +24,7 @@ logging.getLogger("github").setLevel(logging.ERROR)
 # Import enhanced GitHub client
 try:
     from nuggit.util.github_client import get_github_client, RetryConfig
+    from nuggit.util.timezone import normalize_github_datetime, utc_now_iso
     USE_ENHANCED_CLIENT = True
 except ImportError:
     USE_ENHANCED_CLIENT = False
@@ -148,20 +149,20 @@ def get_repo_info(repo_owner, repo_name, token=None):
             "url": repo.html_url,
             "topics": ', '.join(get_repo_topics(repo)),
             "license": get_repo_license(repo),
-            "created_at": repo.created_at.isoformat() if repo.created_at else "",
-            "updated_at": repo.updated_at.isoformat() if repo.updated_at else "",
+            "created_at": normalize_github_datetime(repo.created_at.isoformat() if repo.created_at else None) or "",
+            "updated_at": normalize_github_datetime(repo.updated_at.isoformat() if repo.updated_at else None) or "",
             "stars": repo.stargazers_count,
             "forks": repo.forks_count,
             "issues": repo.open_issues_count,
             "contributors": total_contributors if isinstance(total_contributors, int) else 5000,
             "commits": total_commits,
-            "last_commit": repo.pushed_at.isoformat() if repo.pushed_at else "",
+            "last_commit": normalize_github_datetime(repo.pushed_at.isoformat() if repo.pushed_at else None) or "",
             "latest_release": get_repo_latest_release(repo),
             "tags": "",
             "notes": ""
         }
 
-        repo_info["last_synced"] = datetime.utcnow().isoformat()
+        repo_info["last_synced"] = utc_now_iso()
 
         return repo_info
 
@@ -228,12 +229,13 @@ def get_recent_commits(repo, limit=5, branch=None, max_retries=3):
                     if commit and commit.commit and commit.commit.author:
                         author_name = commit.commit.author.name or "Unknown"
 
-                    # Get date with fallbacks
+                    # Get date with fallbacks and normalize timezone
                     commit_date = ""
                     if commit and commit.commit and commit.commit.author:
                         if commit.commit.author.date:
                             try:
-                                commit_date = commit.commit.author.date.isoformat()
+                                raw_date = commit.commit.author.date.isoformat()
+                                commit_date = normalize_github_datetime(raw_date) or ""
                             except (AttributeError, TypeError):
                                 commit_date = str(commit.commit.author.date)
 

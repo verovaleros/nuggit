@@ -11,6 +11,8 @@ from datetime import datetime
 from typing import Any, Dict, Optional, Union
 from enum import Enum
 
+from nuggit.util.timezone import utc_now_iso
+
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -155,7 +157,7 @@ def create_error_response(
         error_code=error_code,
         message=message,
         details=details,
-        timestamp=datetime.utcnow().isoformat() + "Z",
+        timestamp=utc_now_iso(),
         request_id=request_id,
         path=path
     )
@@ -273,7 +275,7 @@ def create_http_exception(
         error_code=error_code,
         message=message,
         details=details,
-        timestamp=datetime.utcnow().isoformat() + "Z"
+        timestamp=utc_now_iso()
     )
     
     return HTTPException(

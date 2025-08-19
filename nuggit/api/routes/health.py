@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from nuggit.util.db import get_connection, DB_PATH
 from nuggit.util.connection_pool import get_pool_stats
 from nuggit.util.github_client import get_client_stats
+from nuggit.util.timezone import utc_now_iso
 from nuggit.api.utils.error_handling import database_error, internal_server_error
 
 logger = logging.getLogger(__name__)
@@ -55,7 +56,7 @@ async def health_check():
     Raises:
         HTTPException: If critical health checks fail
     """
-    timestamp = datetime.utcnow().isoformat() + "Z"
+    timestamp = utc_now_iso()
     checks = {}
     database_info = {}
     connection_pool_info = {}
@@ -265,7 +266,7 @@ async def vacuum_database():
             "page_count": page_count,
             "page_size": page_size,
             "free_pages": free_pages,
-            "timestamp": datetime.utcnow().isoformat() + "Z"
+            "timestamp": utc_now_iso()
         }
         
     except Exception as e:
@@ -304,5 +305,5 @@ async def ping():
     return {
         "status": "ok",
         "message": "pong",
-        "timestamp": datetime.utcnow().isoformat() + "Z"
+        "timestamp": utc_now_iso()
     }

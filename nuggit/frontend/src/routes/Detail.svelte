@@ -2,6 +2,13 @@
   import { onMount, onDestroy } from 'svelte';
   import TagInput from '../components/TagInput.svelte';
   import ErrorBoundary from '../components/ErrorBoundary.svelte';
+  import {
+    formatDateTime,
+    formatRelativeTime,
+    formatDateTimeWithRelative,
+    formatCompactDate,
+    isValidDate
+  } from '../lib/timezone.js';
 
   let repoId = null;
   let repo = null;
@@ -626,89 +633,17 @@
             </div>`;
   }
 
-  // Format date to human-readable format
+  // Format date to human-readable format (using timezone utilities)
   function formatDate(dateString) {
-    if (!dateString) return 'N/A';
-
-    try {
-      const date = new Date(dateString);
-
-      // Check if date is valid
-      if (isNaN(date.getTime())) return dateString;
-
-      // Format options
-      const options = {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZoneName: 'short'
-      };
-
-      return date.toLocaleDateString(undefined, options);
-    } catch (error) {
-      console.error('Error formatting date:', error);
-      return dateString;
-    }
+    return formatDateTime(dateString, { includeTime: true, includeTimezone: true });
   }
 
-  // Format date with days ago
+  // Format date with relative time (using timezone utilities)
   function formatDateWithDaysAgo(dateString) {
-    if (!dateString) return 'N/A';
-
-    try {
-      const date = new Date(dateString);
-
-      // Check if date is valid
-      if (isNaN(date.getTime())) return dateString;
-
-      // Format the date
-      const formattedDate = formatDate(dateString);
-
-      // Calculate days ago
-      const now = new Date();
-      const diffTime = Math.abs(now - date);
-      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-
-      // Return formatted string
-      return `${formattedDate} (${diffDays} ${diffDays === 1 ? 'day' : 'days'} ago)`;
-    } catch (error) {
-      console.error('Error formatting date with days ago:', error);
-      return dateString;
-    }
+    return formatDateTimeWithRelative(dateString, { includeTime: true, includeTimezone: true });
   }
 
-  // Format relative time (e.g., "2 days ago")
-  function formatRelativeTime(dateString) {
-    if (!dateString) return 'N/A';
 
-    try {
-      const date = new Date(dateString);
-
-      // Check if date is valid
-      if (isNaN(date.getTime())) return dateString;
-
-      const now = new Date();
-      const diffMs = now - date;
-      const diffSec = Math.floor(diffMs / 1000);
-      const diffMin = Math.floor(diffSec / 60);
-      const diffHour = Math.floor(diffMin / 60);
-      const diffDay = Math.floor(diffHour / 24);
-      const diffMonth = Math.floor(diffDay / 30);
-      const diffYear = Math.floor(diffDay / 365);
-
-      if (diffSec < 60) return 'just now';
-      if (diffMin < 60) return `${diffMin} minute${diffMin === 1 ? '' : 's'} ago`;
-      if (diffHour < 24) return `${diffHour} hour${diffHour === 1 ? '' : 's'} ago`;
-      if (diffDay < 30) return `${diffDay} day${diffDay === 1 ? '' : 's'} ago`;
-      if (diffMonth < 12) return `${diffMonth} month${diffMonth === 1 ? '' : 's'} ago`;
-      return `${diffYear} year${diffYear === 1 ? '' : 's'} ago`;
-    } catch (error) {
-      console.error('Error formatting relative time:', error);
-      return dateString;
-    }
-  }
 
   async function addVersion() {
     if (!newVersion.trim()) {

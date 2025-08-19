@@ -5,6 +5,8 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 import logging
 
+from nuggit.util.timezone import utc_now_iso, normalize_github_datetime
+
 logger = logging.getLogger(__name__)
 
 DB_PATH = Path(__file__).resolve().parent.parent / "nuggit.db"
@@ -173,7 +175,8 @@ def add_origin_version(repo_id: str) -> int:
     Raises:
         sqlite3.Error: If the database insert fails.
     """
-    today = datetime.utcnow().date()
+    from nuggit.util.timezone import now_utc
+    today = now_utc().date()
     version_name = today.strftime("%Y.%m.%d")
     release_date = today.isoformat()
     description = f"Indexed on {release_date}"
@@ -208,7 +211,7 @@ def insert_or_update_repo(repo_data: Dict[str, Any]) -> None:
         logger.error(f"Repository data validation failed: {e}")
         raise
 
-    timestamp = datetime.utcnow().isoformat()
+    timestamp = utc_now_iso()
     validated_data.setdefault('last_synced', timestamp)
 
     # Ensure version is set for new repositories
@@ -426,7 +429,7 @@ def update_repository_fields(repo_id: str, fields: Dict[str, Any], expected_vers
         sqlite3.Error: If any database operation fails.
         OptimisticLockError: If version conflict occurs.
     """
-    timestamp = datetime.utcnow().isoformat()
+    timestamp = utc_now_iso()
 
     # Include version in the select query if optimistic locking is used
     select_cols = list(fields.keys())
@@ -530,7 +533,7 @@ def add_comment(repo_id: str, comment: str, author: str = "Anonymous") -> int:
     """
     from nuggit.util.validation import validate_comment_data, ValidationError
 
-    created_at = datetime.utcnow().isoformat()
+    created_at = utc_now_iso()
 
     # Validate comment data
     comment_data = {
@@ -593,7 +596,7 @@ def add_version(repo_id: str, version_number: str, release_date: Optional[str] =
     """
     from nuggit.util.validation import validate_version_data, ValidationError
 
-    created_at = datetime.utcnow().isoformat()
+    created_at = utc_now_iso()
 
     # Validate version data
     version_data = {
@@ -654,7 +657,8 @@ def create_repository_version(repo_id: str, repo_info: Dict[str, Any]) -> int:
     Raises:
         sqlite3.Error: If the database insert fails.
     """
-    today = datetime.utcnow().date()
+    from nuggit.util.timezone import now_utc
+    today = now_utc().date()
     version_name = today.strftime("%Y.%m.%d")
     release_date = today.isoformat()
 

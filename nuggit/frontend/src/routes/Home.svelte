@@ -2,6 +2,13 @@
   import { onMount, onDestroy } from 'svelte';
   import TagInput from '../components/TagInput.svelte';
   import ErrorBoundary from '../components/ErrorBoundary.svelte';
+  import {
+    formatDateTime,
+    formatRelativeTime,
+    formatDateTimeWithRelative,
+    formatCompactDate,
+    isValidDate
+  } from '../lib/timezone.js';
 
   let currentTab = 'repos';
 
@@ -208,52 +215,12 @@
   }
 
   function formatDate(dateString) {
-    if (!dateString) return 'N/A';
-
-    try {
-      const date = new Date(dateString);
-
-      // Check if the date is valid
-      if (isNaN(date.getTime())) return 'Invalid date';
-
-      // Format the date as a readable string
-      return date.toLocaleString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    } catch (error) {
-      console.error('Error formatting date:', error);
-      return dateString; // Return the original string if there's an error
-    }
+    return formatDateTime(dateString, { includeTime: true, includeTimezone: false });
   }
 
-  // Format date with days ago
+  // Format date with relative time
   function formatDateWithDaysAgo(dateString) {
-    if (!dateString) return 'N/A';
-
-    try {
-      const date = new Date(dateString);
-
-      // Check if date is valid
-      if (isNaN(date.getTime())) return dateString;
-
-      // Format the date
-      const formattedDate = formatDate(dateString);
-
-      // Calculate days ago
-      const now = new Date();
-      const diffTime = Math.abs(now - date);
-      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-
-      // Return formatted string
-      return `${formattedDate} (${diffDays} ${diffDays === 1 ? 'day' : 'days'} ago)`;
-    } catch (error) {
-      console.error('Error formatting date with days ago:', error);
-      return dateString;
-    }
+    return formatDateTimeWithRelative(dateString, { includeTime: true, includeTimezone: false });
   }
 
   // Helper function to determine if a string is a GitHub URL
