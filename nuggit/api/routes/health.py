@@ -27,6 +27,14 @@ except ImportError:
     ERROR_RECOVERY_AVAILABLE = False
     logger.warning("Error recovery utilities not available")
 
+# Import logging utilities
+try:
+    from nuggit.util.logging_config import get_performance_logger, get_audit_logger
+    LOGGING_UTILITIES_AVAILABLE = True
+except ImportError:
+    LOGGING_UTILITIES_AVAILABLE = False
+    logger.warning("Logging utilities not available")
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -420,6 +428,103 @@ async def reset_circuit_breaker(name: str):
     except Exception as e:
         logger.error(f"Circuit breaker reset failed: {e}")
         raise internal_server_error("Failed to reset circuit breaker")
+
+
+@router.get("/health/logs", summary="Logging system status")
+async def logging_system_status():
+    """
+    Get logging system status and recent log statistics.
+
+    Returns:
+        dict: Logging system status and statistics
+
+    Raises:
+        HTTPException: If logging system query fails
+    """
+    if not LOGGING_UTILITIES_AVAILABLE:
+        return {
+            "status": "unavailable",
+            "message": "Logging utilities not available",
+            "timestamp": utc_now_iso()
+        }
+
+    try:
+        # Get log file information
+        import os
+        from pathlib import Path
+
+        log_dir = Path("logs")
+        log_files = []
+
+        if log_dir.exists():
+            for log_file in log_dir.glob("*.log"):
+                try:
+                    stat = log_file.stat()
+                    log_files.append({
+                        "name": log_file.name,
+                        "size_bytes": stat.st_size,
+                        "modified": datetime.fromtimestamp(stat.st_mtime).isoformat()
+                    })
+                except Exception as e:
+                    logger.warning(f"Could not get stats for {log_file}: {e}")
+
+        return {
+            "status": "available",
+            "log_directory": str(log_dir.absolute()) if log_dir.exists() else "not found",
+            "log_files": log_files,
+            "active_loggers": [
+                name for name in logging.Logger.manager.loggerDict.keys()
+                if not name.startswith("_")
+            ][:20],  # Limit to first 20 loggers
+            "timestamp": utc_now_iso()
+        }
+
+    except Exception as e:
+        logger.error(f"Logging system status query failed: {e}")
+        raise internal_server_error("Failed to retrieve logging system status")
+
+
+@router.post("/health/logs/level", summary="Change log level")
+async def change_log_level(level: str):
+    """
+    Change the logging level for the application.
+
+    Args:
+        level: New log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+
+    Returns:
+        dict: Confirmation of log level change
+
+    Raises:
+        HTTPException: If log level change fails
+    """
+    valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
+    if level.upper() not in valid_levels:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid log level. Must be one of: {', '.join(valid_levels)}"
+        )
+
+    try:
+        # Change root logger level
+        root_logger = logging.getLogger()
+        old_level = logging.getLevelName(root_logger.level)
+        root_logger.setLevel(getattr(logging, level.upper()))
+
+        logger.info(f"Log level changed from {old_level} to {level.upper()}")
+
+        return {
+            "success": True,
+            "old_level": old_level,
+            "new_level": level.upper(),
+            "message": f"Log level changed to {level.upper()}",
+            "timestamp": utc_now_iso()
+        }
+
+    except Exception as e:
+        logger.error(f"Log level change failed: {e}")
+        raise internal_server_error("Failed to change log level")
 
 
 @router.get("/health/ping", summary="Simple ping check")

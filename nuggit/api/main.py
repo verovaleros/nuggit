@@ -4,6 +4,14 @@ from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
 import logging
+import os
+
+# Initialize comprehensive logging
+from nuggit.util.logging_config import init_logging_from_env, RequestLoggingMiddleware, LogTimer
+
+# Initialize logging system
+logging_setup = init_logging_from_env()
+logger = logging.getLogger(__name__)
 
 from nuggit.api.routes import repositories
 from nuggit.api.routes import detail
@@ -14,13 +22,14 @@ from nuggit.api.utils.error_handling import (
     create_error_response, ErrorCode, log_error_context
 )
 
-logger = logging.getLogger(__name__)
-
 app = FastAPI(
     title="Nuggit API",
     description="API for managing and reviewing GitHub repositories",
     version="0.1.0"
 )
+
+# Add request logging middleware
+app.middleware("http")(RequestLoggingMiddleware(app))
 
 # Optional: allow frontend apps to talk to API
 app.add_middleware(
@@ -30,6 +39,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+logger.info("Nuggit API starting up", extra={
+    "event_type": "startup",
+    "api_version": "0.1.0",
+    "logging_config": logging_setup["config"].__dict__
+})
 
 
 # Global exception handlers

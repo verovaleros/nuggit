@@ -7,6 +7,15 @@ import logging
 
 from nuggit.util.timezone import utc_now_iso, normalize_github_datetime
 
+# Import logging utilities
+try:
+    from nuggit.util.logging_config import LogTimer, get_performance_logger, get_audit_logger
+    PERFORMANCE_LOGGING_AVAILABLE = True
+    audit_logger = get_audit_logger()
+except ImportError:
+    PERFORMANCE_LOGGING_AVAILABLE = False
+    audit_logger = None
+
 logger = logging.getLogger(__name__)
 
 DB_PATH = Path(__file__).resolve().parent.parent / "nuggit.db"
@@ -202,6 +211,17 @@ def insert_or_update_repo(repo_data: Dict[str, Any]) -> None:
         sqlite3.Error: If any database operation fails.
         ValidationError: If data validation fails.
     """
+    operation_name = f"insert_or_update_repo_{repo_data.get('id', 'unknown')}"
+
+    if PERFORMANCE_LOGGING_AVAILABLE:
+        with LogTimer(operation_name, repo_id=repo_data.get('id')):
+            _insert_or_update_repo_impl(repo_data)
+    else:
+        _insert_or_update_repo_impl(repo_data)
+
+
+def _insert_or_update_repo_impl(repo_data: Dict[str, Any]) -> None:
+    """Implementation of insert_or_update_repo with performance logging."""
     from nuggit.util.validation import validate_repository_data, ValidationError
 
     # Validate input data
@@ -277,6 +297,26 @@ def insert_or_update_repo(repo_data: Dict[str, Any]) -> None:
 
     if is_new:
         add_origin_version(validated_data['id'])
+
+        # Audit log for new repository
+        if audit_logger:
+            audit_logger.log_data_change(
+                user="system",
+                table="repositories",
+                operation="INSERT",
+                record_id=validated_data['id'],
+                repo_name=validated_data.get('name', 'unknown')
+            )
+    else:
+        # Audit log for repository update
+        if audit_logger:
+            audit_logger.log_data_change(
+                user="system",
+                table="repositories",
+                operation="UPDATE",
+                record_id=validated_data['id'],
+                repo_name=validated_data.get('name', 'unknown')
+            )
 
 
 def tag_repository(repo_id: str, tag: str) -> bool:
