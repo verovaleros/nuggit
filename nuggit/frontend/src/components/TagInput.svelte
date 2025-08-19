@@ -13,9 +13,11 @@
   const dispatch = createEventDispatcher();
 
   // Update tagArray when tags prop changes
-  // Use a flag to prevent infinite reactive loops
+  // Use flags to prevent infinite reactive loops
   let lastTagsValue = '';
-  $: if (typeof tags === 'string' && tags !== lastTagsValue) {
+  let isInternalUpdate = false;
+
+  $: if (typeof tags === 'string' && tags !== lastTagsValue && !isInternalUpdate) {
     lastTagsValue = tags;
     tagArray = tags.split(',')
       .map(tag => tag.trim())
@@ -53,8 +55,14 @@
 
   // Update the tags string and dispatch change event
   function updateTags() {
+    isInternalUpdate = true;
     tags = tagArray.join(',');
+    lastTagsValue = tags; // Update the tracking value
     dispatch('change', { tags });
+    // Reset the flag after a microtask to allow reactive statement to see the change
+    setTimeout(() => {
+      isInternalUpdate = false;
+    }, 0);
   }
 
   // Handle focus on the container to focus the input
