@@ -8,7 +8,7 @@ services:
       - "5173:5173"  # Frontend port
     volumes:
       - ./nuggit/.env:/app/nuggit/.env:ro  # Mount .env file
-      - ./nuggit.db:/app/nuggit.db  # Mount database file
+      - ./nuggit.db:/app/nuggit/nuggit.db  # Mount database file to correct location
     restart: unless-stopped
     env_file:
       - ./nuggit/.env  # Use the .env file directly
