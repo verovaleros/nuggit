@@ -693,11 +693,14 @@
   th {
     background-color: #1f2937;
     color: white;
-    padding: 1rem;
+    padding: 1rem 2.5rem 1rem 1rem; /* Extra right padding for sort indicator */
     text-align: left;
     cursor: pointer;
     user-select: none;
     position: relative;
+    height: 3.5rem; /* Fixed height to prevent aspect ratio changes */
+    box-sizing: border-box;
+    vertical-align: middle;
   }
 
   th:hover {
@@ -714,6 +717,7 @@
     height: 0;
     border-left: 5px solid transparent;
     border-right: 5px solid transparent;
+    z-index: 1;
   }
 
   th.sorted.asc:after {
