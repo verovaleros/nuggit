@@ -3,10 +3,15 @@ Asynchronous versions of database utility functions.
 
 This module provides asynchronous wrappers around the synchronous database
 functions in db.py, allowing them to be used with FastAPI's async routes.
+Enhanced with proper connection management and error handling.
 """
 
 import asyncio
+import logging
 from typing import Optional, Dict, Any, List
+from functools import wraps
+
+logger = logging.getLogger(__name__)
 
 from nuggit.util.db import (
     get_repository as sync_get_repository,
@@ -19,6 +24,29 @@ from nuggit.util.db import (
 )
 
 
+def async_db_operation(operation_name: str):
+    """
+    Decorator for async database operations with enhanced error handling and logging.
+
+    Args:
+        operation_name: Name of the operation for logging purposes
+    """
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            try:
+                logger.debug(f"Starting async database operation: {operation_name}")
+                result = await func(*args, **kwargs)
+                logger.debug(f"Completed async database operation: {operation_name}")
+                return result
+            except Exception as e:
+                logger.error(f"Async database operation failed: {operation_name} - {e}")
+                raise
+        return wrapper
+    return decorator
+
+
+@async_db_operation("get_repository")
 async def get_repository(repo_id: str) -> Optional[Dict[str, Any]]:
     """
     Asynchronous version of get_repository.

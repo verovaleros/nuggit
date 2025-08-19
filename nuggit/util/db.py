@@ -3,17 +3,28 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = Path(__file__).resolve().parent.parent / "nuggit.db"
+
+# Import connection pool for enhanced connection management
+try:
+    from nuggit.util.connection_pool import get_pooled_connection
+    USE_CONNECTION_POOL = True
+except ImportError:
+    USE_CONNECTION_POOL = False
+    logger.warning("Connection pool not available, falling back to simple connections")
+
 
 @contextmanager
 def get_connection():
     """
-    Context manager for SQLite connections with enhanced defaults:
-    - 30s timeout for busy waits
-    - PARSE_DECLTYPES and PARSE_COLNAMES for type detection
-    - sqlite3.Row row factory for dict-like row access
-    - foreign key enforcement on
+    Context manager for SQLite connections with enhanced connection management.
+
+    Uses connection pooling when available for better performance and leak prevention.
+    Falls back to simple connections if pooling is not available.
 
     Yields:
         sqlite3.Connection: A SQLite connection with custom settings.
@@ -21,33 +32,75 @@ def get_connection():
     Raises:
         sqlite3.Error: If connecting to the database fails.
     """
-    conn = sqlite3.connect(
-        DB_PATH,
-        timeout=30,
-        detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
-    )
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+    if USE_CONNECTION_POOL:
+        # Use connection pool for better connection management
+        with get_pooled_connection(DB_PATH) as conn:
+            yield conn
+    else:
+        # Fallback to simple connection management
+        conn = sqlite3.connect(
+            DB_PATH,
+            timeout=30,
+            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
+        )
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        try:
+            yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
 
 
 def initialize_database() -> None:
     """
-    Initialize the database schema, creating tables if they do not exist.
+    Initialize the database schema using the migration system.
 
-    Tables:
-        - repositories
-        - repository_history
-        - repository_comments
-        - repository_versions
+    This function now uses the migration system to ensure proper
+    schema versioning and data integrity.
 
     Raises:
         sqlite3.Error: If any schema creation statement fails.
+        MigrationError: If migration system fails.
     """
+    from nuggit.util.migrations import MigrationManager
+
+    try:
+        # Use migration system for proper schema management
+        migration_manager = MigrationManager(DB_PATH)
+
+        # Check if we need to run migrations
+        status = migration_manager.get_status()
+
+        if status['pending_count'] > 0:
+            logger.info(f"Running {status['pending_count']} pending migrations...")
+            applied = migration_manager.migrate()
+            logger.info(f"Successfully applied migrations: {', '.join(applied)}")
+        else:
+            logger.info("Database schema is up to date")
+
+        # Validate migration integrity
+        issues = migration_manager.validate_migrations()
+        if issues:
+            logger.warning(f"Migration validation issues: {issues}")
+
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        # Fallback to legacy initialization for backward compatibility
+        logger.info("Falling back to legacy database initialization...")
+        _legacy_initialize_database()
+
+
+def _legacy_initialize_database() -> None:
+    """
+    Legacy database initialization for backward compatibility.
+    This should only be used as a fallback.
+    """
+    logger.warning("Using legacy database initialization - consider running migrations")
+
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -135,7 +188,7 @@ def add_origin_version(repo_id: str) -> int:
 
 def insert_or_update_repo(repo_data: Dict[str, Any]) -> None:
     """
-    Insert a new repository or update an existing one,
+    Insert a new repository or update an existing one with validation,
     recording any field changes in history.
     If it's a new repo, immediately add an initial version named by today's date.
 
@@ -144,15 +197,30 @@ def insert_or_update_repo(repo_data: Dict[str, Any]) -> None:
 
     Raises:
         sqlite3.Error: If any database operation fails.
+        ValidationError: If data validation fails.
     """
-    timestamp = datetime.utcnow().isoformat()
-    repo_data.setdefault('last_synced', timestamp)
+    from nuggit.util.validation import validate_repository_data, ValidationError
 
-    upsert_cols = [
+    # Validate input data
+    try:
+        validated_data = validate_repository_data(repo_data)
+    except ValidationError as e:
+        logger.error(f"Repository data validation failed: {e}")
+        raise
+
+    timestamp = datetime.utcnow().isoformat()
+    validated_data.setdefault('last_synced', timestamp)
+
+    # Ensure version is set for new repositories
+    validated_data.setdefault('version', 1)
+
+    # Only use columns that are actually present in the validated data
+    available_cols = [
         "id", "name", "description", "url", "topics", "license",
         "created_at", "updated_at", "stars", "forks", "issues",
-        "contributors", "commits", "last_commit", "tags", "notes", "last_synced"
+        "contributors", "commits", "last_commit", "tags", "notes", "last_synced", "version"
     ]
+    upsert_cols = [col for col in available_cols if col in validated_data]
 
     query_select = f"SELECT {', '.join(upsert_cols)} FROM repositories WHERE id = ?"
     query_history = """
@@ -164,32 +232,48 @@ def insert_or_update_repo(repo_data: Dict[str, Any]) -> None:
         INSERT INTO repositories ({', '.join(upsert_cols)})
         VALUES ({', '.join(f":{c}" for c in upsert_cols)})
         ON CONFLICT(id) DO UPDATE SET
-        {', '.join(f"{c}=excluded.{c}" for c in upsert_cols if c != "id")}
+        {', '.join(f"{c}=excluded.{c}" for c in upsert_cols if c not in ["id", "version"])},
+        version = version + 1
     """
 
     with get_connection() as conn:
-        cur = conn.execute(query_select, (repo_data['id'],))
+        cur = conn.execute(query_select, (validated_data['id'],))
         row = cur.fetchone()
         is_new = row is None
 
         if row:
             existing = dict(row)
-            history_params: List[tuple] = [
-                (
-                    repo_data['id'], field,
-                    str(existing[field]), str(repo_data[field]),
-                    timestamp
-                )
-                for field in repo_data
-                if field in existing and str(repo_data[field]) != str(existing[field])
-            ]
+            # Validate and record history changes
+            history_params: List[tuple] = []
+            for field in validated_data:
+                if field in existing and str(validated_data[field]) != str(existing[field]):
+                    history_data = {
+                        'repo_id': validated_data['id'],
+                        'field': field,
+                        'old_value': str(existing[field]),
+                        'new_value': str(validated_data[field]),
+                        'changed_at': timestamp
+                    }
+                    try:
+                        from nuggit.util.validation import validate_history_data
+                        validated_history = validate_history_data(history_data)
+                        history_params.append((
+                            validated_history['repo_id'],
+                            validated_history['field'],
+                            validated_history['old_value'],
+                            validated_history['new_value'],
+                            validated_history['changed_at']
+                        ))
+                    except Exception as e:
+                        logger.warning(f"History validation failed for {field}: {e}")
+
             if history_params:
                 conn.executemany(query_history, history_params)
 
-        conn.execute(query_upsert, repo_data)
+        conn.execute(query_upsert, validated_data)
 
     if is_new:
-        add_origin_version(repo_data['id'])
+        add_origin_version(validated_data['id'])
 
 
 def tag_repository(repo_id: str, tag: str) -> bool:
@@ -321,36 +405,68 @@ def update_repository_metadata(repo_id: str, tags: str, notes: str) -> bool:
         return conn.execute(query, (tags, notes, repo_id)).rowcount > 0
 
 
-def update_repository_fields(repo_id: str, fields: Dict[str, Any]) -> bool:
+class OptimisticLockError(Exception):
+    """Raised when an optimistic lock conflict occurs."""
+    pass
+
+
+def update_repository_fields(repo_id: str, fields: Dict[str, Any], expected_version: Optional[int] = None) -> bool:
     """
-    Update specific fields of a repository and record changes in history.
+    Update specific fields of a repository with optimistic locking and record changes in history.
 
     Args:
         repo_id (str): Repository ID.
         fields (Dict[str, Any]): Fields to update.
+        expected_version (Optional[int]): Expected version for optimistic locking.
 
     Returns:
         bool: True if update succeeded, False otherwise.
 
     Raises:
         sqlite3.Error: If any database operation fails.
+        OptimisticLockError: If version conflict occurs.
     """
     timestamp = datetime.utcnow().isoformat()
-    cols = ", ".join(fields.keys())
+
+    # Include version in the select query if optimistic locking is used
+    select_cols = list(fields.keys())
+    if expected_version is not None:
+        select_cols.append('version')
+
+    cols = ", ".join(select_cols)
     query_select = f"SELECT {cols} FROM repositories WHERE id = ?"
     query_history = """
         INSERT INTO repository_history
             (repo_id, field, old_value, new_value, changed_at)
         VALUES (?, ?, ?, ?, ?)
     """
+
+    # Build update query with version increment if using optimistic locking
     set_clauses = [f"{f} = ?" for f in fields] + ["last_synced = ?"]
-    query_update = f"UPDATE repositories SET {', '.join(set_clauses)} WHERE id = ?"
+    where_clause = "WHERE id = ?"
+
+    if expected_version is not None:
+        set_clauses.append("version = version + 1")
+        where_clause += " AND version = ?"
+
+    query_update = f"UPDATE repositories SET {', '.join(set_clauses)} {where_clause}"
 
     with get_connection() as conn:
         row = conn.execute(query_select, (repo_id,)).fetchone()
         if not row:
             return False
+
         existing = dict(row)
+
+        # Check version for optimistic locking
+        if expected_version is not None:
+            current_version = existing.get('version', 1)
+            if current_version != expected_version:
+                raise OptimisticLockError(
+                    f"Version conflict: expected {expected_version}, got {current_version}"
+                )
+
+        # Record history for changed fields
         history_params = [
             (repo_id, f, str(existing.get(f)), str(v), timestamp)
             for f, v in fields.items()
@@ -358,8 +474,19 @@ def update_repository_fields(repo_id: str, fields: Dict[str, Any]) -> bool:
         ]
         if history_params:
             conn.executemany(query_history, history_params)
+
+        # Execute update
         params = list(fields.values()) + [timestamp, repo_id]
-        return conn.execute(query_update, params).rowcount > 0
+        if expected_version is not None:
+            params.append(expected_version)
+
+        result = conn.execute(query_update, params)
+
+        # Check if update was successful (handles optimistic locking)
+        if result.rowcount == 0 and expected_version is not None:
+            raise OptimisticLockError("Update failed due to version conflict")
+
+        return result.rowcount > 0
 
 
 def delete_repository(repo_id: str) -> bool:
@@ -387,7 +514,7 @@ def delete_repository(repo_id: str) -> bool:
 
 def add_comment(repo_id: str, comment: str, author: str = "Anonymous") -> int:
     """
-    Add a comment to a repository.
+    Add a comment to a repository with validation.
 
     Args:
         repo_id (str): The ID of the repository.
@@ -399,11 +526,34 @@ def add_comment(repo_id: str, comment: str, author: str = "Anonymous") -> int:
 
     Raises:
         sqlite3.Error: If the database insert fails.
+        ValidationError: If data validation fails.
     """
+    from nuggit.util.validation import validate_comment_data, ValidationError
+
     created_at = datetime.utcnow().isoformat()
+
+    # Validate comment data
+    comment_data = {
+        'repo_id': repo_id,
+        'comment': comment,
+        'author': author,
+        'created_at': created_at
+    }
+
+    try:
+        validated_data = validate_comment_data(comment_data)
+    except ValidationError as e:
+        logger.error(f"Comment data validation failed: {e}")
+        raise
+
     query = "INSERT INTO repository_comments (repo_id, comment, author, created_at) VALUES (?, ?, ?, ?)"
     with get_connection() as conn:
-        return conn.execute(query, (repo_id, comment, author, created_at)).lastrowid
+        return conn.execute(query, (
+            validated_data['repo_id'],
+            validated_data['comment'],
+            validated_data['author'],
+            validated_data['created_at']
+        )).lastrowid
 
 
 def get_comments(repo_id: str) -> List[Dict[str, Any]]:
@@ -426,7 +576,7 @@ def get_comments(repo_id: str) -> List[Dict[str, Any]]:
 
 def add_version(repo_id: str, version_number: str, release_date: Optional[str] = None, description: Optional[str] = None) -> int:
     """
-    Add a version to a repository.
+    Add a version to a repository with validation.
 
     Args:
         repo_id (str): The repository ID.
@@ -439,11 +589,36 @@ def add_version(repo_id: str, version_number: str, release_date: Optional[str] =
 
     Raises:
         sqlite3.Error: If the database insert fails.
+        ValidationError: If data validation fails.
     """
+    from nuggit.util.validation import validate_version_data, ValidationError
+
     created_at = datetime.utcnow().isoformat()
+
+    # Validate version data
+    version_data = {
+        'repo_id': repo_id,
+        'version_number': version_number,
+        'release_date': release_date,
+        'description': description,
+        'created_at': created_at
+    }
+
+    try:
+        validated_data = validate_version_data(version_data)
+    except ValidationError as e:
+        logger.error(f"Version data validation failed: {e}")
+        raise
+
     query = "INSERT INTO repository_versions (repo_id, version_number, release_date, description, created_at) VALUES (?, ?, ?, ?, ?)"
     with get_connection() as conn:
-        return conn.execute(query, (repo_id, version_number, release_date, description, created_at)).lastrowid
+        return conn.execute(query, (
+            validated_data['repo_id'],
+            validated_data['version_number'],
+            validated_data.get('release_date'),
+            validated_data.get('description'),
+            validated_data['created_at']
+        )).lastrowid
 
 
 def get_versions(repo_id: str) -> List[Dict[str, Any]]:
