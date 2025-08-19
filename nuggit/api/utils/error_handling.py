@@ -13,6 +13,14 @@ from enum import Enum
 
 from nuggit.util.timezone import utc_now_iso
 
+# Import error recovery utilities
+try:
+    from nuggit.util.error_recovery import get_error_monitor, CircuitBreakerOpenError
+    ERROR_RECOVERY_AVAILABLE = True
+except ImportError:
+    ERROR_RECOVERY_AVAILABLE = False
+    logger.warning("Error recovery utilities not available")
+
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -45,6 +53,8 @@ class ErrorCode(str, Enum):
     OPTIMISTIC_LOCK_ERROR = "OPTIMISTIC_LOCK_ERROR"
     DUPLICATE_RESOURCE = "DUPLICATE_RESOURCE"
     RESOURCE_CONFLICT = "RESOURCE_CONFLICT"
+    CIRCUIT_BREAKER_OPEN = "CIRCUIT_BREAKER_OPEN"
+    SERVICE_UNAVAILABLE = "SERVICE_UNAVAILABLE"
 
 
 class ErrorDetail(BaseModel):
@@ -134,12 +144,23 @@ class GitHubAPIException(NuggitException):
 
 class OptimisticLockException(NuggitException):
     """Exception for optimistic locking conflicts."""
-    
+
     def __init__(self, message: str = "Resource was modified by another process"):
         super().__init__(
             message=message,
             error_code=ErrorCode.OPTIMISTIC_LOCK_ERROR,
             status_code=409
+        )
+
+
+class CircuitBreakerException(NuggitException):
+    """Exception for circuit breaker open state."""
+
+    def __init__(self, message: str = "Service temporarily unavailable"):
+        super().__init__(
+            message=message,
+            error_code=ErrorCode.CIRCUIT_BREAKER_OPEN,
+            status_code=503
         )
 
 
@@ -241,14 +262,14 @@ def log_error_context(
     request: Optional[Request] = None,
     additional_context: Optional[Dict[str, Any]] = None
 ):
-    """Log error with additional context for debugging."""
-    
+    """Log error with additional context for debugging and monitoring."""
+
     context = {
         "error_type": type(error).__name__,
         "error_message": str(error),
         "traceback": traceback.format_exc()
     }
-    
+
     if request:
         context.update({
             "method": request.method,
@@ -256,11 +277,19 @@ def log_error_context(
             "headers": dict(request.headers),
             "client": request.client.host if request.client else None
         })
-    
+
     if additional_context:
         context.update(additional_context)
-    
+
     logger.error("Error context", extra={"context": context})
+
+    # Record error in monitoring system
+    if ERROR_RECOVERY_AVAILABLE:
+        try:
+            monitor = get_error_monitor()
+            monitor.record_error(error, context)
+        except Exception as monitor_error:
+            logger.warning(f"Failed to record error in monitor: {monitor_error}")
 
 
 def create_http_exception(

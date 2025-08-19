@@ -17,6 +17,15 @@ from github import Github
 from github.GithubException import GithubException
 from github.Repository import Repository
 
+from nuggit.util.timezone import now_utc, utc_now_iso
+
+# Import error recovery utilities
+try:
+    from nuggit.util.error_recovery import circuit_breaker, CircuitBreakerConfig
+    ERROR_RECOVERY_AVAILABLE = True
+except ImportError:
+    ERROR_RECOVERY_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
@@ -225,18 +234,36 @@ class GitHubAPIClient:
         raise last_exception
     
     def get_repository(self, repo_name: str, config: Optional[RetryConfig] = None) -> Repository:
-        """Get a repository with retry logic."""
+        """Get a repository with retry logic and circuit breaker protection."""
         if config is None:
             config = RetryConfig()
-        
+
         def operation():
             return self._github.get_repo(repo_name)
-        
-        return self._execute_with_retry(
-            operation,
-            config,
-            f"get_repository({repo_name})"
-        )
+
+        # Use circuit breaker if available
+        if ERROR_RECOVERY_AVAILABLE:
+            cb_config = CircuitBreakerConfig(
+                failure_threshold=3,
+                recovery_timeout=30,
+                success_threshold=2
+            )
+
+            @circuit_breaker(f"github_get_repo_{repo_name}", cb_config)
+            def protected_operation():
+                return self._execute_with_retry(
+                    operation,
+                    config,
+                    f"get_repository({repo_name})"
+                )
+
+            return protected_operation()
+        else:
+            return self._execute_with_retry(
+                operation,
+                config,
+                f"get_repository({repo_name})"
+            )
     
     def get_repository_info(
         self,

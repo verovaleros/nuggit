@@ -19,6 +19,14 @@ from nuggit.util.github_client import get_client_stats
 from nuggit.util.timezone import utc_now_iso
 from nuggit.api.utils.error_handling import database_error, internal_server_error
 
+# Import error recovery utilities
+try:
+    from nuggit.util.error_recovery import get_error_recovery_manager, get_error_monitor
+    ERROR_RECOVERY_AVAILABLE = True
+except ImportError:
+    ERROR_RECOVERY_AVAILABLE = False
+    logger.warning("Error recovery utilities not available")
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -31,6 +39,7 @@ class HealthStatus(BaseModel):
     database: Dict[str, Any]
     connection_pool: Dict[str, Any]
     github_client: Dict[str, Any]
+    error_recovery: Dict[str, Any]
     checks: Dict[str, bool]
 
 
@@ -61,6 +70,7 @@ async def health_check():
     database_info = {}
     connection_pool_info = {}
     github_client_info = {}
+    error_recovery_info = {}
     
     # Database connectivity check
     try:
@@ -111,6 +121,25 @@ async def health_check():
         logger.error(f"GitHub client health check failed: {e}")
         checks["github_client"] = False
         github_client_info["error"] = str(e)
+
+    # Error recovery system status
+    if ERROR_RECOVERY_AVAILABLE:
+        try:
+            recovery_manager = get_error_recovery_manager()
+            error_monitor = get_error_monitor()
+
+            error_recovery_info = {
+                "circuit_breakers": recovery_manager.get_all_stats(),
+                "error_metrics": error_monitor.get_metrics()
+            }
+            checks["error_recovery"] = True
+        except Exception as e:
+            logger.error(f"Error recovery health check failed: {e}")
+            checks["error_recovery"] = False
+            error_recovery_info["error"] = str(e)
+    else:
+        checks["error_recovery"] = False
+        error_recovery_info["error"] = "Error recovery system not available"
     
     # Schema migration check
     try:
@@ -144,6 +173,7 @@ async def health_check():
         database=database_info,
         connection_pool=connection_pool_info,
         github_client=github_client_info,
+        error_recovery=error_recovery_info,
         checks=checks
     )
 
@@ -292,6 +322,104 @@ async def github_client_status():
     except Exception as e:
         logger.error(f"GitHub client status query failed: {e}")
         raise internal_server_error("Failed to retrieve GitHub client status")
+
+
+@router.get("/health/errors", summary="Error monitoring status")
+async def error_monitoring_status():
+    """
+    Get error monitoring and recovery status.
+
+    Returns:
+        dict: Error monitoring statistics and circuit breaker status
+
+    Raises:
+        HTTPException: If error monitoring query fails
+    """
+    if not ERROR_RECOVERY_AVAILABLE:
+        raise internal_server_error("Error recovery system not available")
+
+    try:
+        recovery_manager = get_error_recovery_manager()
+        error_monitor = get_error_monitor()
+
+        return {
+            "circuit_breakers": recovery_manager.get_all_stats(),
+            "error_metrics": error_monitor.get_metrics(),
+            "recent_errors": error_monitor.get_recent_errors(limit=5),
+            "timestamp": utc_now_iso()
+        }
+
+    except Exception as e:
+        logger.error(f"Error monitoring status query failed: {e}")
+        raise internal_server_error("Failed to retrieve error monitoring status")
+
+
+@router.post("/health/errors/reset", summary="Reset error monitoring")
+async def reset_error_monitoring():
+    """
+    Reset error monitoring metrics.
+
+    Returns:
+        dict: Reset confirmation
+
+    Raises:
+        HTTPException: If reset operation fails
+    """
+    if not ERROR_RECOVERY_AVAILABLE:
+        raise internal_server_error("Error recovery system not available")
+
+    try:
+        error_monitor = get_error_monitor()
+        error_monitor.clear_metrics()
+
+        return {
+            "success": True,
+            "message": "Error monitoring metrics reset",
+            "timestamp": utc_now_iso()
+        }
+
+    except Exception as e:
+        logger.error(f"Error monitoring reset failed: {e}")
+        raise internal_server_error("Failed to reset error monitoring")
+
+
+@router.post("/health/circuit-breakers/{name}/reset", summary="Reset circuit breaker")
+async def reset_circuit_breaker(name: str):
+    """
+    Manually reset a specific circuit breaker.
+
+    Args:
+        name: Name of the circuit breaker to reset
+
+    Returns:
+        dict: Reset confirmation
+
+    Raises:
+        HTTPException: If reset operation fails
+    """
+    if not ERROR_RECOVERY_AVAILABLE:
+        raise internal_server_error("Error recovery system not available")
+
+    try:
+        recovery_manager = get_error_recovery_manager()
+        success = recovery_manager.reset_circuit_breaker(name)
+
+        if success:
+            return {
+                "success": True,
+                "message": f"Circuit breaker '{name}' reset successfully",
+                "timestamp": utc_now_iso()
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"Circuit breaker '{name}' not found",
+                "timestamp": utc_now_iso()
+            }
+
+    except Exception as e:
+        logger.error(f"Circuit breaker reset failed: {e}")
+        raise internal_server_error("Failed to reset circuit breaker")
 
 
 @router.get("/health/ping", summary="Simple ping check")
