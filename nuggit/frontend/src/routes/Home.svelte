@@ -1076,6 +1076,7 @@
               <th class={sortField === 'license' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('license')}>License</th>
               <th class={sortField === 'stars' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('stars')}>Stars</th>
               <th class={sortField === 'last_commit' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('last_commit')}>Last Commit</th>
+              <th class={sortField === 'last_synced' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('last_synced')}>Last Updated</th>
             </tr>
           </thead>
           <tbody>
@@ -1086,6 +1087,7 @@
                 <td>{repo.license}</td>
                 <td>{repo.stars}</td>
                 <td>{formatDateWithDaysAgo(repo.last_commit)}</td>
+                <td>{formatDateWithDaysAgo(repo.last_synced)}</td>
               </tr>
             {/each}
           </tbody>
