@@ -1,8 +1,19 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from pydantic import ValidationError
+import logging
+
 from nuggit.api.routes import repositories
 from nuggit.api.routes import detail
 import nuggit.api.routes.versions as versions
+from nuggit.api.utils.error_handling import (
+    NuggitException, handle_validation_error, handle_generic_error,
+    create_error_response, ErrorCode, log_error_context
+)
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Nuggit API",
@@ -18,6 +29,65 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Global exception handlers
+@app.exception_handler(NuggitException)
+async def nuggit_exception_handler(request: Request, exc: NuggitException):
+    """Handle custom Nuggit exceptions."""
+    log_error_context(exc, request)
+
+    return create_error_response(
+        error_code=exc.error_code,
+        message=exc.message,
+        status_code=exc.status_code,
+        details=exc.details,
+        path=str(request.url.path)
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle FastAPI request validation errors."""
+    log_error_context(exc, request)
+    return handle_validation_error(exc)
+
+
+@app.exception_handler(ValidationError)
+async def pydantic_validation_exception_handler(request: Request, exc: ValidationError):
+    """Handle Pydantic validation errors."""
+    log_error_context(exc, request)
+    return handle_validation_error(exc)
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    """Handle HTTPException with standardized format."""
+    log_error_context(exc, request)
+
+    # If detail is already a dict (standardized format), return as-is
+    if isinstance(exc.detail, dict) and 'error_code' in exc.detail:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=exc.detail
+        )
+
+    # Otherwise, standardize the response
+    error_code = ErrorCode.REPOSITORY_NOT_FOUND if exc.status_code == 404 else ErrorCode.INTERNAL_SERVER_ERROR
+
+    return create_error_response(
+        error_code=error_code,
+        message=str(exc.detail),
+        status_code=exc.status_code,
+        path=str(request.url.path)
+    )
+
+
+@app.exception_handler(Exception)
+async def generic_exception_handler(request: Request, exc: Exception):
+    """Handle all other unexpected exceptions."""
+    log_error_context(exc, request)
+    return handle_generic_error(exc, "request processing")
 
 # Include routers
 # Note: Order matters! More specific routes should come before general ones

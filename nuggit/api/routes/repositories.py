@@ -18,6 +18,10 @@ from nuggit.util.db import (
     create_repository_version,
 )
 from nuggit.util.github import get_repo_info, validate_repo_url
+from nuggit.api.utils.error_handling import (
+    repository_not_found, github_api_error, database_error,
+    internal_server_error, ErrorCode, create_http_exception
+)
 
 router = APIRouter()
 
@@ -68,13 +72,20 @@ def retry_github(
                     time.sleep(wait)
                 continue
             if e.status == 404:
-                raise HTTPException(404, f"{owner}/{name} not found on GitHub")
+                raise repository_not_found(f"{owner}/{name}")
             break
         except Exception as e:
             last_exc = e
             logging.error(f"GitHub call failed: {e}")
             break
-    raise HTTPException(500, f"GitHub error: {last_exc}")
+    # Handle final error based on type
+    if isinstance(last_exc, GithubException):
+        if last_exc.status == 403:
+            raise github_api_error("GitHub API rate limit exceeded", 429)
+        else:
+            raise github_api_error(f"GitHub API error: {last_exc}")
+    else:
+        raise internal_server_error(f"GitHub operation failed: {last_exc}")
 
 
 def parse_owner_name(id: Optional[str], url: Optional[str]) -> Tuple[str, str]:
@@ -190,8 +201,8 @@ def list_repositories():
     try:
         return {"repositories": list_all_repositories()}
     except Exception as e:
-        logging.error(e)
-        raise HTTPException(500, "Could not list repositories")
+        logging.error(f"Error listing repositories: {e}")
+        raise database_error("Failed to retrieve repositories")
 
 
 @router.get("/check/{repo_id:path}", summary="Check if a repository exists")
@@ -212,8 +223,8 @@ def check_repository(repo_id: str):
         repo = get_repository(repo_id)
         return {"exists": bool(repo), "repository": repo}
     except Exception as e:
-        logging.error(e)
-        raise HTTPException(500, "Error checking repository")
+        logging.error(f"Error checking repository {repo_id}: {e}")
+        raise database_error("Failed to check repository existence")
 
 
 @router.post(
