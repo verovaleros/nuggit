@@ -13,12 +13,13 @@
   const dispatch = createEventDispatcher();
 
   // Update tagArray when tags prop changes
-  $: {
-    if (typeof tags === 'string') {
-      tagArray = tags.split(',')
-        .map(tag => tag.trim())
-        .filter(tag => tag.length > 0);
-    }
+  // Use a flag to prevent infinite reactive loops
+  let lastTagsValue = '';
+  $: if (typeof tags === 'string' && tags !== lastTagsValue) {
+    lastTagsValue = tags;
+    tagArray = tags.split(',')
+      .map(tag => tag.trim())
+      .filter(tag => tag.length > 0);
   }
 
   // Handle input keydown events

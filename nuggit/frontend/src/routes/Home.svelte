@@ -157,10 +157,12 @@
     console.log(`Now showing up to ${currentDisplayCount} repositories`);
   }
 
-  // Reactive statement to handle search term changes
-  $: if (searchTerm !== undefined) {
-    console.log('Search term changed to:', searchTerm);
-    // Reset to show only the first page when search changes
+  // Combined reactive statement to handle search and sort changes
+  // This prevents race conditions between multiple reactive statements
+  $: if (allRepos && searchTerm !== undefined && sortField && sortOrder) {
+    console.log('Updating filtered repositories - search:', searchTerm, 'sort:', sortField, sortOrder);
+
+    // Reset to show only the first page when search or sort changes
     currentDisplayCount = pageSize;
 
     // Filter and sort repositories
@@ -168,12 +170,6 @@
     filteredRepos = sortRepositories(filtered);
 
     console.log(`Showing ${filteredRepos.length} repositories, sorted by ${sortField} (${sortOrder})`);
-  }
-
-  // Reactive statement to handle sort changes
-  $: if (sortField && sortOrder) {
-    console.log(`Sort changed to: ${sortField} (${sortOrder})`);
-    filteredRepos = sortRepositories(allRepos.filter(matchesSearch));
   }
 
   // This reactive statement has been moved above

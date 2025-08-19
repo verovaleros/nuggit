@@ -5,10 +5,8 @@
   let repoId = null;
   let repo = null;
 
-  // Initialize repo with empty recent_commits array to avoid errors
-  $: if (repo && !repo.recent_commits) {
-    repo.recent_commits = [];
-  }
+  // Derived value to safely access recent_commits without modifying repo
+  $: recentCommits = repo?.recent_commits || [];
   let loading = true;
   let error = null;
 
@@ -326,7 +324,7 @@
     commitsCollapsed = !commitsCollapsed;
 
     // If we're expanding the commits section and there are no commits yet, fetch them
-    if (!commitsCollapsed && (!repo.recent_commits || repo.recent_commits.length === 0)) {
+    if (!commitsCollapsed && recentCommits.length === 0) {
       await fetchCommits();
     }
   }
@@ -2372,7 +2370,7 @@
             <button on:click={fetchCommits} class="retry-button">Retry</button>
           </div>
         </div>
-      {:else if repo.recent_commits && repo.recent_commits.length > 0}
+      {:else if recentCommits.length > 0}
         <table>
           <thead>
             <tr>
@@ -2383,7 +2381,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each repo.recent_commits as commit}
+            {#each recentCommits as commit}
               <tr>
                 <td>{formatDateWithDaysAgo(commit.date)}</td>
                 <td>{commit.sha}</td>
