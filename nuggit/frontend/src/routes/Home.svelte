@@ -844,9 +844,7 @@
     margin-right: auto;
   }
 
-  .batch-results h3 {
-    margin-bottom: 0.5rem;
-  }
+
 
   .success-list, .failed-list {
     margin-top: 0.5rem;

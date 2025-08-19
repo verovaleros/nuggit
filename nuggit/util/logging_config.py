@@ -353,34 +353,30 @@ def init_logging_from_env():
     return setup_logging(config)
 
 
-# Request logging middleware for FastAPI
-class RequestLoggingMiddleware:
+# Request logging middleware for FastAPI using BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import Response
+
+
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Middleware to log HTTP requests and responses."""
 
     def __init__(self, app, logger_name: str = "nuggit.requests"):
-        self.app = app
+        super().__init__(app)
         self.logger = logging.getLogger(logger_name)
 
-    async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
+    async def dispatch(self, request: Request, call_next):
+        """Process the request and log details."""
         # Extract request information
         request_info = {
-            "method": scope["method"],
-            "path": scope["path"],
-            "query_string": scope["query_string"].decode(),
-            "client": scope.get("client", ["unknown", 0])[0],
-            "user_agent": None,
+            "method": request.method,
+            "path": str(request.url.path),
+            "query_string": str(request.url.query) if request.url.query else "",
+            "client": request.client.host if request.client else "unknown",
+            "user_agent": request.headers.get("user-agent", "unknown"),
             "request_id": f"req_{datetime.now().timestamp()}_{os.getpid()}"
         }
-
-        # Extract headers
-        headers = dict(scope.get("headers", []))
-        for name, value in headers.items():
-            if name == b"user-agent":
-                request_info["user_agent"] = value.decode()
 
         start_time = datetime.now().timestamp()
 
@@ -393,21 +389,30 @@ class RequestLoggingMiddleware:
             }
         )
 
-        # Capture response
+        # Process request
         response_info = {"status_code": None, "response_size": 0}
 
-        async def send_wrapper(message):
-            if message["type"] == "http.response.start":
-                response_info["status_code"] = message["status"]
-            elif message["type"] == "http.response.body":
-                response_info["response_size"] += len(message.get("body", b""))
-            await send(message)
-
         try:
-            await self.app(scope, receive, send_wrapper)
+            response: Response = await call_next(request)
+            response_info["status_code"] = response.status_code
+
+            # Try to get response size if available
+            if hasattr(response, 'body'):
+                response_info["response_size"] = len(response.body) if response.body else 0
+
+            return response
+
         except Exception as e:
             response_info["status_code"] = 500
             response_info["error"] = str(e)
+            self.logger.error(
+                f"Request failed: {request_info['method']} {request_info['path']} - {e}",
+                extra={
+                    "event_type": "request_error",
+                    "error": str(e),
+                    **request_info
+                }
+            )
             raise
         finally:
             # Log request completion

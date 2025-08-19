@@ -29,7 +29,7 @@ app = FastAPI(
 )
 
 # Add request logging middleware
-app.middleware("http")(RequestLoggingMiddleware(app))
+app.add_middleware(RequestLoggingMiddleware)
 
 # Optional: allow frontend apps to talk to API
 app.add_middleware(
