@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import TagInput from '../components/TagInput.svelte';
   import ErrorBoundary from '../components/ErrorBoundary.svelte';
+  import Admin from '../components/Admin.svelte';
   import {
     formatDateTime,
     formatRelativeTime,
@@ -1016,6 +1017,7 @@
     <button class:active={currentTab === 'tags'} on:click={() => switchTab('tags')}>🏷️ Tags</button>
     <button class:active={currentTab === 'stats'} on:click={() => switchTab('stats')}>📊 Stats</button>
     <button class:active={currentTab === 'add'} on:click={() => switchTab('add')}>➕ Add Repo</button>
+    <button class:active={currentTab === 'admin'} on:click={() => switchTab('admin')}>🔧 Admin</button>
   </nav>
 
   {#if currentTab === 'repos'}
@@ -1167,6 +1169,9 @@ username3/repo3"
         {/if}
       </div>
     </div>
+
+  {:else if currentTab === 'admin'}
+    <Admin />
   {/if}
 
   <!-- Version Footer for Troubleshooting -->
