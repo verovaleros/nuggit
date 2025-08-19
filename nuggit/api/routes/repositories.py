@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import random
 import logging
 from typing import Optional, List, Callable, Any, Dict, Tuple
 
@@ -17,7 +18,8 @@ from nuggit.util.db import (
     update_repository_metadata,
     create_repository_version,
 )
-from nuggit.util.github import get_repo_info, validate_repo_url
+from nuggit.util.github import get_repo_info, validate_repo_url, get_token
+from nuggit.util.github_client import get_github_client, RetryConfig
 from nuggit.api.utils.error_handling import (
     repository_not_found, github_api_error, database_error,
     internal_server_error, ErrorCode, create_http_exception
@@ -65,11 +67,10 @@ def retry_github(
         except GithubException as e:
             last_exc = e
             if e.status == 403 and attempt < retries - 1:
-                # Only wait if we have retries left
-                if retries > 0:
-                    wait = 0.5  # Use a minimal wait time
-                    logging.warning(f"Rate limit, retrying immediately...")
-                    time.sleep(wait)
+                # Exponential backoff with jitter for rate limits
+                wait = min(2 ** attempt + random.uniform(0, 1), 30)
+                logging.warning(f"Rate limit, retrying in {wait:.1f}s...")
+                time.sleep(wait)
                 continue
             if e.status == 404:
                 raise repository_not_found(f"{owner}/{name}")

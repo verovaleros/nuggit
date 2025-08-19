@@ -1,6 +1,7 @@
 import re
 import time
 import os
+import random
 from github import Github
 from github.GithubException import GithubException
 import logging
@@ -19,6 +20,14 @@ else:
 
 # Suppress lower-level logs from PyGithub
 logging.getLogger("github").setLevel(logging.ERROR)
+
+# Import enhanced GitHub client
+try:
+    from nuggit.util.github_client import get_github_client, RetryConfig
+    USE_ENHANCED_CLIENT = True
+except ImportError:
+    USE_ENHANCED_CLIENT = False
+    logging.warning("Enhanced GitHub client not available, using basic client")
 
 
 def validate_repo_url(repo_url):
@@ -87,7 +96,7 @@ def get_repo_topics(repo):
 
 def get_repo_info(repo_owner, repo_name, token=None):
     """
-    Get information about a GitHub repository.
+    Get information about a GitHub repository with enhanced rate limiting.
     Args:
         repo_owner (str): The owner of the repository.
         repo_name (str): The name of the repository.
@@ -99,8 +108,16 @@ def get_repo_info(repo_owner, repo_name, token=None):
     if token is None:
         token = GITHUB_TOKEN
 
-    # Authenticate with GitHub with a shorter timeout
-    gh = Github(token, timeout=3) if token else Github(timeout=3)
+    # Use enhanced client if available
+    if USE_ENHANCED_CLIENT:
+        try:
+            client = get_github_client(token)
+            return client.get_repository_info(repo_owner, repo_name)
+        except Exception as e:
+            logging.error(f"Enhanced client failed, falling back to basic client: {e}")
+
+    # Fallback to basic client
+    gh = Github(token, timeout=10) if token else Github(timeout=10)
 
     try:
         rate = gh.get_rate_limit().core
@@ -185,7 +202,7 @@ def get_recent_commits(repo, limit=5, branch=None, max_retries=3):
     # Initialize result list
     result = []
 
-    # Retry logic for API rate limits or network issues
+    # Enhanced retry logic with exponential backoff
     for attempt in range(max_retries):
         try:
             # Get commits with optional branch parameter
@@ -248,9 +265,10 @@ def get_recent_commits(repo, limit=5, branch=None, max_retries=3):
 
         except GithubException as e:
             if e.status == 403 and attempt < max_retries - 1:
-                # This might be a rate limit issue, retry with minimal delay
-                logging.warning(f"GitHub API rate limit hit, retrying ({attempt+1}/{max_retries}): {e}")
-                time.sleep(0.1)  # Minimal delay
+                # Rate limit hit - use exponential backoff
+                wait_time = min(2 ** attempt + random.uniform(0, 1), 60)  # Cap at 60 seconds
+                logging.warning(f"GitHub API rate limit hit, retrying ({attempt+1}/{max_retries}) in {wait_time:.1f}s: {e}")
+                time.sleep(wait_time)
             elif e.status == 404:
                 # Repository or branch not found
                 logging.error(f"Repository or branch not found: {e}")
@@ -265,4 +283,20 @@ def get_recent_commits(repo, limit=5, branch=None, max_retries=3):
             return []
 
     return result
+
+
+def get_token():
+    """Get the GitHub token."""
+    return GITHUB_TOKEN
+
+
+def get_gh_client(token: str = None):
+    """Get a GitHub client instance with enhanced rate limiting."""
+    if token is None:
+        token = GITHUB_TOKEN
+
+    if USE_ENHANCED_CLIENT:
+        return get_github_client(token)
+    else:
+        return Github(token, timeout=10) if token else Github(timeout=10)
 

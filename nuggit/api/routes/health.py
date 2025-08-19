@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from nuggit.util.db import get_connection, DB_PATH
 from nuggit.util.connection_pool import get_pool_stats
+from nuggit.util.github_client import get_client_stats
 from nuggit.api.utils.error_handling import database_error, internal_server_error
 
 logger = logging.getLogger(__name__)
@@ -23,11 +24,12 @@ router = APIRouter()
 
 class HealthStatus(BaseModel):
     """Health status response model."""
-    
+
     status: str
     timestamp: str
     database: Dict[str, Any]
     connection_pool: Dict[str, Any]
+    github_client: Dict[str, Any]
     checks: Dict[str, bool]
 
 
@@ -57,6 +59,7 @@ async def health_check():
     checks = {}
     database_info = {}
     connection_pool_info = {}
+    github_client_info = {}
     
     # Database connectivity check
     try:
@@ -98,6 +101,15 @@ async def health_check():
         logger.error(f"Connection pool health check failed: {e}")
         checks["connection_pool"] = False
         connection_pool_info["error"] = str(e)
+
+    # GitHub client status
+    try:
+        github_client_info = get_client_stats()
+        checks["github_client"] = True
+    except Exception as e:
+        logger.error(f"GitHub client health check failed: {e}")
+        checks["github_client"] = False
+        github_client_info["error"] = str(e)
     
     # Schema migration check
     try:
@@ -130,6 +142,7 @@ async def health_check():
         timestamp=timestamp,
         database=database_info,
         connection_pool=connection_pool_info,
+        github_client=github_client_info,
         checks=checks
     )
 
@@ -260,11 +273,31 @@ async def vacuum_database():
         raise database_error("Failed to vacuum database")
 
 
+@router.get("/health/github", summary="GitHub client status")
+async def github_client_status():
+    """
+    Get GitHub client status and rate limiting information.
+
+    Returns:
+        dict: GitHub client statistics and rate limit information
+
+    Raises:
+        HTTPException: If GitHub client query fails
+    """
+    try:
+        stats = get_client_stats()
+        return stats
+
+    except Exception as e:
+        logger.error(f"GitHub client status query failed: {e}")
+        raise internal_server_error("Failed to retrieve GitHub client status")
+
+
 @router.get("/health/ping", summary="Simple ping check")
 async def ping():
     """
     Simple ping endpoint for basic health monitoring.
-    
+
     Returns:
         dict: Simple pong response with timestamp
     """
