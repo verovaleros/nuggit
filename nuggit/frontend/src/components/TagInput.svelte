@@ -60,9 +60,23 @@
   function handleContainerClick() {
     inputElement.focus();
   }
+
+  function handleContainerKeydown(event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      inputElement.focus();
+    }
+  }
 </script>
 
-<div class="tag-input-container" on:click={handleContainerClick}>
+<div
+  class="tag-input-container"
+  on:click={handleContainerClick}
+  on:keydown={handleContainerKeydown}
+  role="textbox"
+  tabindex="0"
+  aria-label="Tag input container"
+>
   {#each tagArray as tag, index}
     <div class="tag">
       <span class="tag-text">{tag}</span>

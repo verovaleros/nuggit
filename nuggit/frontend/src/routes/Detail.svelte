@@ -283,6 +283,13 @@
     commentsCollapsed = !commentsCollapsed;
   }
 
+  function handleCommentsKeydown(event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      toggleComments();
+    }
+  }
+
   // State for commit loading
   let loadingCommits = false;
   let commitsError = null;
@@ -293,6 +300,13 @@
     // If we're expanding the commits section and there are no commits yet, fetch them
     if (!commitsCollapsed && (!repo.recent_commits || repo.recent_commits.length === 0)) {
       await fetchCommits();
+    }
+  }
+
+  async function handleCommitsKeydown(event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      await toggleCommits();
     }
   }
 
@@ -433,6 +447,13 @@
     versionsCollapsed = !versionsCollapsed;
   }
 
+  function handleVersionsKeydown(event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      toggleVersions();
+    }
+  }
+
   function toggleComparison() {
     showComparison = !showComparison;
     if (!showComparison) {
@@ -441,6 +462,13 @@
       selectedVersion2 = null;
       comparisonResult = null;
       comparisonError = null;
+    }
+  }
+
+  function handleComparisonKeydown(event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      toggleComparison();
     }
   }
 
@@ -1929,12 +1957,20 @@
     {/if}
 
     <!-- Comments Section (Collapsible) -->
-    <div class="section-header" on:click={toggleComments}>
+    <div
+      class="section-header"
+      on:click={toggleComments}
+      on:keydown={handleCommentsKeydown}
+      role="button"
+      tabindex="0"
+      aria-expanded={!commentsCollapsed}
+      aria-controls="comments-content"
+    >
       <h2>💬 Comments</h2>
       <span class="toggle-icon {commentsCollapsed ? 'collapsed' : ''}">▾</span>
     </div>
 
-    <div class="section-content {commentsCollapsed ? 'collapsed' : ''}">
+    <div id="comments-content" class="section-content {commentsCollapsed ? 'collapsed' : ''}">
       <!-- Comment form -->
       <div class="comment-form">
         <div class="comment-form-header">
@@ -1982,12 +2018,20 @@
     </div>
 
     <!-- Version Tracker Section (Collapsible) -->
-    <div class="section-header" on:click={toggleVersions}>
+    <div
+      class="section-header"
+      on:click={toggleVersions}
+      on:keydown={handleVersionsKeydown}
+      role="button"
+      tabindex="0"
+      aria-expanded={!versionsCollapsed}
+      aria-controls="versions-content"
+    >
       <h2>📈 Version Tracker</h2>
       <span class="toggle-icon {versionsCollapsed ? 'collapsed' : ''}">▾</span>
     </div>
 
-    <div class="section-content {versionsCollapsed ? 'collapsed' : ''}">
+    <div id="versions-content" class="section-content {versionsCollapsed ? 'collapsed' : ''}">
       <!-- Version form -->
       <div class="version-form">
         <div class="version-form-row">
@@ -2048,12 +2092,20 @@
     </div>
 
     <!-- Compare Versions Section (Collapsible) -->
-    <div class="section-header" on:click={toggleComparison}>
+    <div
+      class="section-header"
+      on:click={toggleComparison}
+      on:keydown={handleComparisonKeydown}
+      role="button"
+      tabindex="0"
+      aria-expanded={showComparison}
+      aria-controls="comparison-content"
+    >
       <h2>🔍 Compare Versions</h2>
       <span class="toggle-icon {!showComparison ? 'collapsed' : ''}">▾</span>
     </div>
 
-    <div class="section-content {!showComparison ? 'collapsed' : ''}">
+    <div id="comparison-content" class="section-content {!showComparison ? 'collapsed' : ''}">
       {#if repo.versions && repo.versions.length > 1}
         <div class="comparison-selectors">
           <div class="comparison-selector">
@@ -2324,12 +2376,20 @@
     </div>
 
     <!-- Recent Commits Section (Collapsible) -->
-    <div class="section-header" on:click={toggleCommits}>
+    <div
+      class="section-header"
+      on:click={toggleCommits}
+      on:keydown={handleCommitsKeydown}
+      role="button"
+      tabindex="0"
+      aria-expanded={!commitsCollapsed}
+      aria-controls="commits-content"
+    >
       <h2>🕘 Recent Commits</h2>
       <span class="toggle-icon {commitsCollapsed ? 'collapsed' : ''}">▾</span>
     </div>
 
-    <div class="section-content {commitsCollapsed ? 'collapsed' : ''}">
+    <div id="commits-content" class="section-content {commitsCollapsed ? 'collapsed' : ''}">
       {#if loadingCommits}
         <div class="loading-commits">
           <p style="text-align: center;">Loading commits from GitHub...</p>
