@@ -36,7 +36,7 @@ class RepositoryModel(BaseModel):
     stars: Optional[int] = Field(None, ge=0, description="Number of stars")
     forks: Optional[int] = Field(None, ge=0, description="Number of forks")
     issues: Optional[int] = Field(None, ge=0, description="Number of open issues")
-    contributors: Optional[str] = Field(None, max_length=50, description="Number of contributors")
+    contributors: Optional[Union[int, str]] = Field(None, description="Number of contributors")
     commits: Optional[int] = Field(None, ge=0, description="Total number of commits")
     last_commit: Optional[str] = Field(None, description="Last commit timestamp")
     tags: Optional[str] = Field(None, max_length=500, description="User-defined tags")
@@ -96,6 +96,34 @@ class RepositoryModel(BaseModel):
             raise ValueError('Too many items in comma-separated list')
         
         return v
+
+    @field_validator('contributors')
+    @classmethod
+    def validate_contributors(cls, v: Optional[Union[int, str]]) -> Optional[str]:
+        """Validate contributors field - convert int to string for database storage."""
+        if v is None:
+            return v
+
+        # If it's already a string, validate it
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
+            # Check if it's a numeric string
+            if v.isdigit():
+                return v
+            # Allow special values like "5000+"
+            if re.match(r'^\d+\+?$', v):
+                return v
+            raise ValueError('Contributors must be a number or number with + suffix')
+
+        # If it's an integer, convert to string
+        if isinstance(v, int):
+            if v < 0:
+                raise ValueError('Contributors count cannot be negative')
+            return str(v)
+
+        raise ValueError('Contributors must be a number or string')
 
     @field_validator('name')
     @classmethod
