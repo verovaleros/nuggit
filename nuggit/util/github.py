@@ -121,7 +121,12 @@ def get_repo_info(repo_owner, repo_name, token=None):
     gh = Github(token, timeout=10) if token else Github(timeout=10)
 
     try:
-        rate = gh.get_rate_limit().core
+        rate_limit = gh.get_rate_limit()
+        # Handle different PyGithub API versions
+        if hasattr(rate_limit, 'core'):
+            rate = rate_limit.core
+        else:
+            rate = rate_limit
         print(f"🔑 Authenticated? {token is not None}")
         print(f"📊 GitHub Rate Limit: {rate.remaining}/{rate.limit}, reset at {rate.reset}")
     except Exception as e:

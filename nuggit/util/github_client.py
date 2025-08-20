@@ -77,7 +77,7 @@ class GitHubAPIClient:
         self._github = Github(token, timeout=timeout) if token else Github(timeout=timeout)
         self._rate_limit_cache: Dict[RateLimitType, RateLimitInfo] = {}
         self._last_rate_limit_check = datetime.min
-        self._rate_limit_check_interval = timedelta(minutes=1)
+        self._rate_limit_check_interval = timedelta(minutes=5)  # Check every 5 minutes instead of 1
         
         # Statistics
         self._stats = {
@@ -92,35 +92,64 @@ class GitHubAPIClient:
     def _update_rate_limit_info(self, force: bool = False):
         """Update cached rate limit information."""
         now = datetime.utcnow()
-        
+
         if not force and (now - self._last_rate_limit_check) < self._rate_limit_check_interval:
             return
-        
+
         try:
             rate_limit = self._github.get_rate_limit()
-            
+
+            # Handle different PyGithub API versions
+            if hasattr(rate_limit, 'core'):
+                # Newer PyGithub API
+                core = rate_limit.core
+                search = rate_limit.search
+            else:
+                # Older PyGithub API or different structure
+                # Use the rate_limit object directly if it has the needed attributes
+                if hasattr(rate_limit, 'limit'):
+                    core = rate_limit
+                    search = rate_limit  # Use same for both if no separate search
+                else:
+                    # If we can't determine the structure, create default values
+                    logger.debug("Unable to determine rate limit structure, using defaults")
+                    self._rate_limit_cache[RateLimitType.CORE] = RateLimitInfo(
+                        limit=5000, remaining=5000, reset_time=int(now.timestamp()) + 3600, used=0
+                    )
+                    self._rate_limit_cache[RateLimitType.SEARCH] = RateLimitInfo(
+                        limit=30, remaining=30, reset_time=int(now.timestamp()) + 3600, used=0
+                    )
+                    self._last_rate_limit_check = now
+                    return
+
             # Update core rate limit
-            core = rate_limit.core
             self._rate_limit_cache[RateLimitType.CORE] = RateLimitInfo(
                 limit=core.limit,
                 remaining=core.remaining,
                 reset_time=core.reset,
                 used=core.limit - core.remaining
             )
-            
+
             # Update search rate limit
-            search = rate_limit.search
             self._rate_limit_cache[RateLimitType.SEARCH] = RateLimitInfo(
                 limit=search.limit,
                 remaining=search.remaining,
                 reset_time=search.reset,
                 used=search.limit - search.remaining
             )
-            
+
             self._last_rate_limit_check = now
-            
+
         except Exception as e:
-            logger.warning(f"Failed to update rate limit info: {e}")
+            logger.debug(f"Failed to update rate limit info: {e}")
+            # Don't spam warnings, just use default values
+            if not self._rate_limit_cache:
+                self._rate_limit_cache[RateLimitType.CORE] = RateLimitInfo(
+                    limit=5000, remaining=5000, reset_time=int(now.timestamp()) + 3600, used=0
+                )
+                self._rate_limit_cache[RateLimitType.SEARCH] = RateLimitInfo(
+                    limit=30, remaining=30, reset_time=int(now.timestamp()) + 3600, used=0
+                )
     
     def get_rate_limit_info(self, rate_type: RateLimitType = RateLimitType.CORE) -> Optional[RateLimitInfo]:
         """Get current rate limit information."""
@@ -178,14 +207,15 @@ class GitHubAPIClient:
         
         for attempt in range(config.max_retries + 1):
             try:
-                # Check rate limit before making request
-                rate_info = self.get_rate_limit_info()
-                if rate_info and rate_info.is_exhausted:
-                    wait_time = rate_info.reset_in_seconds + random.uniform(1, 5)
-                    logger.warning(f"Rate limit exhausted, waiting {wait_time:.1f}s until reset")
-                    time.sleep(wait_time)
-                    self._stats['total_wait_time'] += wait_time
-                    self._update_rate_limit_info(force=True)
+                # Only check rate limit if we have cached info and it's not the first attempt
+                if attempt > 0 and self._rate_limit_cache:
+                    rate_info = self.get_rate_limit_info()
+                    if rate_info and rate_info.is_exhausted:
+                        wait_time = rate_info.reset_in_seconds + random.uniform(1, 5)
+                        logger.warning(f"Rate limit exhausted, waiting {wait_time:.1f}s until reset")
+                        time.sleep(wait_time)
+                        self._stats['total_wait_time'] += wait_time
+                        self._update_rate_limit_info(force=True)
                 
                 # Execute the operation
                 self._stats['requests_made'] += 1
