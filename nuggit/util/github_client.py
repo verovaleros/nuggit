@@ -304,11 +304,51 @@ class GitHubAPIClient:
         """Get repository information with enhanced error handling."""
         if config is None:
             config = RetryConfig()
-        
+
         def operation():
-            from nuggit.util.github import get_repo_info
-            return get_repo_info(owner, name, self.token)
-        
+            # Call GitHub API directly to avoid recursion
+            repo = self._github.get_repo(f"{owner}/{name}")
+
+            # Get contributors count (with fallback)
+            try:
+                contributors = repo.get_contributors()
+                total_contributors = contributors.totalCount
+            except Exception:
+                total_contributors = "5000+"
+
+            try:
+                total_commits = repo.get_commits().totalCount
+            except Exception:
+                total_commits = 0
+
+            # Get latest release
+            latest_release = None
+            try:
+                releases = repo.get_releases()
+                if releases.totalCount > 0:
+                    latest_release = releases[0].tag_name
+            except Exception:
+                pass
+
+            # Build repository info
+            return {
+                "id": repo.full_name,
+                "name": repo.name,
+                "description": repo.description or "",
+                "url": repo.html_url,
+                "topics": ", ".join(repo.get_topics()) if hasattr(repo, 'get_topics') else "",
+                "license": repo.license.name if repo.license else "",
+                "created_at": repo.created_at.isoformat() if repo.created_at else None,
+                "updated_at": repo.updated_at.isoformat() if repo.updated_at else None,
+                "stars": repo.stargazers_count,
+                "forks": repo.forks_count,
+                "issues": repo.open_issues_count,
+                "contributors": total_contributors,
+                "commits": total_commits,
+                "last_commit": repo.pushed_at.isoformat() if repo.pushed_at else None,
+                "latest_release": latest_release,
+            }
+
         try:
             return self._execute_with_retry(
                 operation,
