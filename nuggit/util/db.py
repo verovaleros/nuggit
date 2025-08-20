@@ -66,6 +66,9 @@ def get_connection():
             conn.close()
 
 
+
+
+
 def initialize_database() -> None:
     """
     Initialize the database schema using the migration system.
