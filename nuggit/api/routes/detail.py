@@ -468,9 +468,12 @@ async def get_repository_detail(repo_id: str):
         logger.error(f"Error fetching versions for {repo_id}: {versions}")
         versions = []
 
-    # Convert tags from comma-separated string to list
-    if "tags" in repo_data and isinstance(repo_data["tags"], str):
-        repo_data["tags"] = [tag.strip() for tag in repo_data["tags"].split(",")] if repo_data["tags"] else []
+    # Convert tags from comma-separated string to list BEFORE model validation
+    if "tags" in repo_data and isinstance(repo_data["tags"], str) and repo_data["tags"]:
+        repo_data["tags"] = [tag.strip() for tag in repo_data["tags"].split(",")]
+    else:
+        # Handle None, empty string, or missing tags field
+        repo_data["tags"] = []
 
     return RepositoryDetail(
         **repo_data,
