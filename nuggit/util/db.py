@@ -201,7 +201,7 @@ def add_origin_version(repo_id: str) -> int:
     )
 
 
-def insert_or_update_repo(repo_data: Dict[str, Any]) -> None:
+def insert_or_update_repo(repo_data: Dict[str, Any], user_id: Optional[int] = None) -> None:
     """
     Insert a new repository or update an existing one with validation,
     recording any field changes in history.
@@ -209,6 +209,7 @@ def insert_or_update_repo(repo_data: Dict[str, Any]) -> None:
 
     Args:
         repo_data (Dict[str, Any]): Repository fields; must include 'id'.
+        user_id (Optional[int]): ID of the user adding/updating the repository.
 
     Raises:
         sqlite3.Error: If any database operation fails.
@@ -240,11 +241,15 @@ def _insert_or_update_repo_impl(repo_data: Dict[str, Any]) -> None:
     # Ensure version is set for new repositories
     validated_data.setdefault('version', 1)
 
+    # Add user_id if provided (only for new repositories or when explicitly updating)
+    if user_id is not None:
+        validated_data['user_id'] = user_id
+
     # Only use columns that are actually present in the validated data
     available_cols = [
         "id", "name", "description", "url", "topics", "license",
         "created_at", "updated_at", "stars", "forks", "issues",
-        "contributors", "commits", "last_commit", "tags", "notes", "last_synced", "version"
+        "contributors", "commits", "last_commit", "tags", "notes", "last_synced", "version", "user_id"
     ]
     upsert_cols = [col for col in available_cols if col in validated_data]
 

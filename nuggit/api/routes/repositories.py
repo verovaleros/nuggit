@@ -24,6 +24,7 @@ from nuggit.api.utils.error_handling import (
     repository_not_found, github_api_error, database_error,
     internal_server_error, ErrorCode, create_http_exception
 )
+from nuggit.api.routes.auth import get_current_user, require_auth
 
 router = APIRouter()
 
@@ -236,6 +237,7 @@ def check_repository(repo_id: str):
 def add_repository(
     payload: RepositoryInput = Body(...),
     max_retries: int = Query(3, description="Max retry attempts on rate limit."),
+    current_user: dict = Depends(require_auth),
 ):
     """
     Fetch and store repository metadata from GitHub.
@@ -255,7 +257,7 @@ def add_repository(
     owner, name = parse_owner_name(payload.id, payload.url)
     existing = get_repository(f"{owner}/{name}")
     repo_info = retry_github(get_repo_info, owner, name, payload.token, max_retries)
-    insert_or_update_repo(repo_info)
+    insert_or_update_repo(repo_info, user_id=current_user['id'])
     action = "updated" if existing else "added"
     return {
         "message": f"Repository '{repo_info['id']}' {action} successfully.",
@@ -268,6 +270,7 @@ def update_repository(
     repo_id: str,
     token: Optional[str] = Depends(get_token),
     max_retries: int = Query(3, description="Max retry attempts on rate limit."),
+    current_user: dict = Depends(require_auth),
 ):
     """
     Update repository information from GitHub and create a new version snapshot.
@@ -296,6 +299,7 @@ def update_repository(
         max_retries,
         preserve={"tags": existing.get("tags"), "notes": existing.get("notes")},
     )
+    # Don't change user_id for existing repositories during updates
     insert_or_update_repo(repo_info)
     # Create a new version to track this update
     create_repository_version(repo_id, repo_info)
@@ -303,7 +307,7 @@ def update_repository(
 
 
 @router.post("/batch", summary="Import multiple repositories at once")
-def batch_import(batch: BatchRepositoryInput):
+def batch_import(batch: BatchRepositoryInput, current_user: dict = Depends(require_auth)):
     """
     Import multiple repositories from GitHub in a single request.
 
@@ -369,7 +373,7 @@ def batch_import(batch: BatchRepositoryInput):
                 else:
                     repo_info["tags"] = batch.tags
 
-            insert_or_update_repo(repo_info)
+            insert_or_update_repo(repo_info, user_id=current_user['id'])
             # If this is an update (not a new repo), create a version
             if existing:
                 create_repository_version(repo_id, repo_info)

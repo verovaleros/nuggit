@@ -9,19 +9,19 @@ import logging
 from datetime import timedelta
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Depends, status
+from fastapi import APIRouter, HTTPException, Depends, status, Query
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from nuggit.api.models.auth import (
     UserRegistrationRequest, UserLoginRequest, UserLoginResponse,
     EmailVerificationRequest, PasswordResetRequest, PasswordResetConfirmRequest,
-    UserProfile, AuthResponse, TokenRefreshRequest
+    UserProfile, AuthResponse, TokenRefreshRequest, UserListResponse
 )
 from nuggit.util.user_db import (
     create_user, authenticate_user, get_user_by_id, get_user_by_email,
     verify_user_email, update_user_password, create_email_verification_token,
     verify_email_verification_token, create_password_reset_token,
-    verify_password_reset_token, UserAlreadyExistsError
+    verify_password_reset_token, UserAlreadyExistsError, get_users_list
 )
 from nuggit.util.auth import (
     create_access_token, create_refresh_token, verify_token,
@@ -361,7 +361,7 @@ async def reset_password(reset_data: PasswordResetConfirmRequest):
 async def get_current_user_profile(current_user: dict = Depends(require_auth)):
     """
     Get current user's profile information.
-    
+
     Returns the authenticated user's profile data.
     """
     return UserProfile(
@@ -377,3 +377,90 @@ async def get_current_user_profile(current_user: dict = Depends(require_auth)):
         updated_at=current_user['updated_at'],
         last_login_at=current_user['last_login_at']
     )
+
+
+# Admin routes
+@router.get("/admin/users", response_model=UserListResponse)
+async def get_users_list_admin(
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(20, ge=1, le=100, description="Users per page"),
+    search: Optional[str] = Query(None, description="Search by email or username"),
+    is_active: Optional[bool] = Query(None, description="Filter by active status"),
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Get paginated list of users (admin only).
+
+    Returns a paginated list of all users with search and filtering capabilities.
+    """
+    try:
+        result = get_users_list(
+            page=page,
+            per_page=per_page,
+            search=search,
+            is_active=is_active
+        )
+
+        users = [
+            UserProfile(
+                id=user['id'],
+                email=user['email'],
+                username=user['username'],
+                first_name=user['first_name'],
+                last_name=user['last_name'],
+                is_verified=user['is_verified'],
+                is_active=user['is_active'],
+                is_admin=user['is_admin'],
+                created_at=user['created_at'],
+                updated_at=user['updated_at'],
+                last_login_at=user['last_login_at']
+            )
+            for user in result['users']
+        ]
+
+        return UserListResponse(
+            users=users,
+            total=result['total'],
+            page=result['page'],
+            per_page=result['per_page']
+        )
+
+    except Exception as e:
+        logger.error(f"Failed to get users list: {e}")
+        raise internal_server_error("Failed to retrieve users list")
+
+
+@router.get("/admin/users/{user_id}", response_model=UserProfile)
+async def get_user_admin(
+    user_id: int,
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Get user details by ID (admin only).
+
+    Returns detailed information about a specific user.
+    """
+    try:
+        user = get_user_by_id(user_id)
+        if not user:
+            raise not_found_error(f"User with ID {user_id} not found")
+
+        return UserProfile(
+            id=user['id'],
+            email=user['email'],
+            username=user['username'],
+            first_name=user['first_name'],
+            last_name=user['last_name'],
+            is_verified=user['is_verified'],
+            is_active=user['is_active'],
+            is_admin=user['is_admin'],
+            created_at=user['created_at'],
+            updated_at=user['updated_at'],
+            last_login_at=user['last_login_at']
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get user {user_id}: {e}")
+        raise internal_server_error("Failed to retrieve user details")
