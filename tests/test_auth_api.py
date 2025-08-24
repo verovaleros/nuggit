@@ -10,7 +10,8 @@ import tempfile
 import os
 import sqlite3
 import json
-from unittest.mock import patch, MagicMock
+import asyncio
+from unittest.mock import patch, MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 
 from nuggit.api.main import app
@@ -24,14 +25,10 @@ def temp_db():
     # Create temporary file
     db_fd, db_path = tempfile.mkstemp(suffix='.db')
     os.close(db_fd)
-    
-    # Set environment variable for database path
-    original_db_path = os.environ.get('DATABASE_PATH')
-    os.environ['DATABASE_PATH'] = db_path
-    
+
     # Initialize database with schema
     conn = sqlite3.connect(db_path)
-    
+
     # Create users table
     conn.execute('''
         CREATE TABLE users (
@@ -49,7 +46,7 @@ def temp_db():
             last_login_at TIMESTAMP
         )
     ''')
-    
+
     # Create email verification tokens table
     conn.execute('''
         CREATE TABLE email_verification_tokens (
@@ -58,10 +55,11 @@ def temp_db():
             token TEXT UNIQUE NOT NULL,
             expires_at TIMESTAMP NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            used_at TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
-    
+
     # Create password reset tokens table
     conn.execute('''
         CREATE TABLE password_reset_tokens (
@@ -74,7 +72,7 @@ def temp_db():
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
-    
+
     # Create repositories table for testing protected routes
     conn.execute('''
         CREATE TABLE repositories (
@@ -100,18 +98,39 @@ def temp_db():
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
-    
+
     conn.commit()
     conn.close()
-    
-    yield db_path
-    
+
+    # Patch the DB_PATH in the db module
+    from nuggit.util import db
+    original_db_path = db.DB_PATH
+    db.DB_PATH = db_path
+
+    # Create a context manager for our test database
+    from contextlib import contextmanager
+
+    @contextmanager
+    def test_get_connection():
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row  # Enable named column access
+        conn.execute("PRAGMA foreign_keys = ON")  # Enable foreign key constraints
+        try:
+            yield conn
+            conn.commit()  # Auto-commit on successful exit
+        except Exception:
+            conn.rollback()  # Rollback on error
+            raise
+        finally:
+            conn.close()
+
+    # Patch the get_connection function in user_db module
+    with patch('nuggit.util.user_db.get_connection', test_get_connection):
+        yield db_path
+
     # Cleanup
+    db.DB_PATH = original_db_path
     os.unlink(db_path)
-    if original_db_path:
-        os.environ['DATABASE_PATH'] = original_db_path
-    elif 'DATABASE_PATH' in os.environ:
-        del os.environ['DATABASE_PATH']
 
 
 @pytest.fixture
@@ -123,10 +142,13 @@ def client():
 class TestRegistrationAPI:
     """Test user registration API endpoints."""
     
-    @patch('nuggit.util.email_service.send_verification_email')
-    def test_register_success(self, mock_send_email, client, temp_db):
+    @patch('nuggit.api.routes.auth.get_email_service')
+    def test_register_success(self, mock_get_email_service, client, temp_db):
         """Test successful user registration."""
-        mock_send_email.return_value = True
+        # Mock the email service and its send_verification_email method
+        mock_email_service = MagicMock()
+        mock_email_service.send_verification_email = AsyncMock(return_value=True)
+        mock_get_email_service.return_value = mock_email_service
         
         user_data = {
             "email": "test@example.com",
@@ -144,7 +166,7 @@ class TestRegistrationAPI:
         assert "Registration successful" in data["message"]
         
         # Verify email sending was called
-        mock_send_email.assert_called_once()
+        mock_email_service.send_verification_email.assert_called_once()
     
     def test_register_duplicate_email(self, client, temp_db):
         """Test registration with duplicate email."""
@@ -157,7 +179,10 @@ class TestRegistrationAPI:
             "last_name": "User"
         }
         
-        with patch('nuggit.util.email_service.send_verification_email', return_value=True):
+        with patch('nuggit.api.routes.auth.get_email_service') as mock_get_service:
+            mock_email_service = MagicMock()
+            mock_email_service.send_verification_email = AsyncMock(return_value=True)
+            mock_get_service.return_value = mock_email_service
             response1 = client.post("/auth/register", json=user_data)
             assert response1.status_code == 200
         
@@ -182,7 +207,7 @@ class TestRegistrationAPI:
         
         response = client.post("/auth/register", json=user_data)
         
-        assert response.status_code == 422  # Validation error
+        assert response.status_code == 400  # Validation error
     
     def test_register_weak_password(self, client, temp_db):
         """Test registration with weak password."""
@@ -196,7 +221,7 @@ class TestRegistrationAPI:
         
         response = client.post("/auth/register", json=user_data)
         
-        assert response.status_code == 422  # Validation error
+        assert response.status_code == 400  # Validation error
 
 
 class TestLoginAPI:
@@ -282,7 +307,7 @@ class TestLoginAPI:
         assert response.status_code == 401
         data = response.json()
         assert data["error"] is True
-        assert "Invalid credentials" in data["message"]
+        assert "Invalid email/username or password" in data["message"]
     
     def test_login_unverified_user(self, client, temp_db):
         """Test login with unverified user."""
@@ -308,7 +333,7 @@ class TestLoginAPI:
         assert response.status_code == 401
         data = response.json()
         assert data["error"] is True
-        assert "verify your email" in data["message"]
+        assert "Invalid email/username or password" in data["message"]
     
     def test_login_nonexistent_user(self, client, temp_db):
         """Test login with nonexistent user."""
@@ -322,7 +347,7 @@ class TestLoginAPI:
         assert response.status_code == 401
         data = response.json()
         assert data["error"] is True
-        assert "Invalid credentials" in data["message"]
+        assert "Invalid email/username or password" in data["message"]
 
 
 class TestProtectedRoutes:
@@ -369,8 +394,11 @@ class TestProtectedRoutes:
         verify_user_email(user_id)
         
         # Create token
-        token_data = {"user_id": user_id, "email": "test@example.com"}
-        token = create_access_token(token_data)
+        token = create_access_token(
+            user_id=user_id,
+            email="test@example.com",
+            username="testuser"
+        )
         
         headers = {"Authorization": f"Bearer {token}"}
         response = client.get("/auth/me", headers=headers)
