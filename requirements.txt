@@ -9,3 +9,7 @@ pydantic[email]
 bcrypt
 PyJWT
 jinja2
+
+# Testing
+pytest>=7.0.0
+httpx>=0.24.0
