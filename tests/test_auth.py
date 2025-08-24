@@ -518,7 +518,8 @@ class TestAuthenticationMiddleware:
         """Create test client."""
         return TestClient(app)
 
-    def test_get_current_user_valid_token(self, temp_db):
+    @pytest.mark.asyncio
+    async def test_get_current_user_valid_token(self, temp_db):
         """Test getting current user with valid token."""
         user_data = {
             'email': 'test@example.com',
@@ -531,28 +532,33 @@ class TestAuthenticationMiddleware:
         user_id = create_user(**user_data)
         verify_user_email(user_id)
 
-        # Create token
-        token_data = {"user_id": user_id, "email": "test@example.com"}
-        token = create_access_token(token_data)
+        # Create token with correct signature
+        token = create_access_token(
+            user_id=user_id,
+            email="test@example.com",
+            username="testuser"
+        )
 
         # Mock the authorization header
         from fastapi.security import HTTPAuthorizationCredentials
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
 
-        user = get_current_user(credentials)
+        user = await get_current_user(credentials)
         assert user['id'] == user_id
         assert user['email'] == 'test@example.com'
 
-    def test_get_current_user_invalid_token(self):
+    @pytest.mark.asyncio
+    async def test_get_current_user_invalid_token(self):
         """Test getting current user with invalid token."""
         from fastapi.security import HTTPAuthorizationCredentials
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="invalid_token")
 
-        with pytest.raises(HTTPException) as exc_info:
-            get_current_user(credentials)
-        assert exc_info.value.status_code == 401
+        # Invalid token should return None, not raise exception
+        user = await get_current_user(credentials)
+        assert user is None
 
-    def test_require_auth_valid_user(self, temp_db):
+    @pytest.mark.asyncio
+    async def test_require_auth_valid_user(self, temp_db):
         """Test require_auth with valid user."""
         user_data = {
             'email': 'test@example.com',
@@ -567,11 +573,12 @@ class TestAuthenticationMiddleware:
         user = get_user_by_id(user_id)
 
         # Should not raise exception for active, verified user
-        result = require_auth(user)
+        result = await require_auth(user)
         assert result == user
 
-    def test_require_auth_inactive_user(self, temp_db):
-        """Test require_auth with inactive user."""
+    @pytest.mark.asyncio
+    async def test_require_auth_inactive_user(self, temp_db):
+        """Test require_auth with inactive user through full auth flow."""
         user_data = {
             'email': 'test@example.com',
             'username': 'testuser',
@@ -583,21 +590,32 @@ class TestAuthenticationMiddleware:
         user_id = create_user(**user_data)
         verify_user_email(user_id)
 
-        # Manually set user as inactive
-        import sqlite3
-        db_path = os.environ.get('DATABASE_PATH')
-        conn = sqlite3.connect(db_path)
-        conn.execute("UPDATE users SET is_active = FALSE WHERE id = ?", (user_id,))
-        conn.commit()
-        conn.close()
+        # Create token first
+        token = create_access_token(
+            user_id=user_id,
+            email="test@example.com",
+            username="testuser"
+        )
 
-        user = get_user_by_id(user_id)
+        # Manually set user as inactive using our test database
+        with sqlite3.connect(temp_db) as conn:
+            conn.execute("UPDATE users SET is_active = 0 WHERE id = ?", (user_id,))
+            conn.commit()
 
+        # Test the full auth flow - get_current_user should return None for inactive user
+        from fastapi.security import HTTPAuthorizationCredentials
+        credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+        current_user = await get_current_user(credentials)
+        assert current_user is None  # Should be None for inactive user
+
+        # require_auth should raise exception when current_user is None
         with pytest.raises(HTTPException) as exc_info:
-            require_auth(user)
+            await require_auth(current_user)
         assert exc_info.value.status_code == 401
 
-    def test_require_admin_admin_user(self, temp_db):
+    @pytest.mark.asyncio
+    async def test_require_admin_admin_user(self, temp_db):
         """Test require_admin with admin user."""
         user_data = {
             'email': 'admin@example.com',
@@ -610,21 +628,19 @@ class TestAuthenticationMiddleware:
         user_id = create_user(**user_data)
         verify_user_email(user_id)
 
-        # Manually set user as admin
-        import sqlite3
-        db_path = os.environ.get('DATABASE_PATH')
-        conn = sqlite3.connect(db_path)
-        conn.execute("UPDATE users SET is_admin = TRUE WHERE id = ?", (user_id,))
-        conn.commit()
-        conn.close()
+        # Manually set user as admin using our test database
+        with sqlite3.connect(temp_db) as conn:
+            conn.execute("UPDATE users SET is_admin = 1 WHERE id = ?", (user_id,))
+            conn.commit()
 
         user = get_user_by_id(user_id)
 
         # Should not raise exception for admin user
-        result = require_admin(user)
+        result = await require_admin(user)
         assert result == user
 
-    def test_require_admin_regular_user(self, temp_db):
+    @pytest.mark.asyncio
+    async def test_require_admin_regular_user(self, temp_db):
         """Test require_admin with regular user."""
         user_data = {
             'email': 'test@example.com',
@@ -639,5 +655,5 @@ class TestAuthenticationMiddleware:
         user = get_user_by_id(user_id)
 
         with pytest.raises(HTTPException) as exc_info:
-            require_admin(user)
+            await require_admin(user)
         assert exc_info.value.status_code == 403
