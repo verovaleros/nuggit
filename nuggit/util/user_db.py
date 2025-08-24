@@ -184,7 +184,11 @@ def authenticate_user(email_or_username: str, password: str) -> Optional[Dict[st
     # Check if user is active
     if not user['is_active']:
         return None
-    
+
+    # Check if user email is verified
+    if not user['is_verified']:
+        return None
+
     # Update last login time
     update_last_login(user['id'])
     

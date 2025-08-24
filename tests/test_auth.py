@@ -138,14 +138,10 @@ def temp_db():
     # Create temporary file
     db_fd, db_path = tempfile.mkstemp(suffix='.db')
     os.close(db_fd)
-    
-    # Set environment variable for database path
-    original_db_path = os.environ.get('DATABASE_PATH')
-    os.environ['DATABASE_PATH'] = db_path
-    
+
     # Initialize database with schema
     conn = sqlite3.connect(db_path)
-    
+
     # Create users table
     conn.execute('''
         CREATE TABLE users (
@@ -163,7 +159,7 @@ def temp_db():
             last_login_at TIMESTAMP
         )
     ''')
-    
+
     # Create email verification tokens table
     conn.execute('''
         CREATE TABLE email_verification_tokens (
@@ -172,10 +168,11 @@ def temp_db():
             token TEXT UNIQUE NOT NULL,
             expires_at TIMESTAMP NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            used_at TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
-    
+
     # Create password reset tokens table
     conn.execute('''
         CREATE TABLE password_reset_tokens (
@@ -188,18 +185,39 @@ def temp_db():
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
-    
+
     conn.commit()
     conn.close()
-    
-    yield db_path
-    
+
+    # Patch the DB_PATH in the db module
+    from nuggit.util import db
+    original_db_path = db.DB_PATH
+    db.DB_PATH = db_path
+
+    # Create a context manager for our test database
+    from contextlib import contextmanager
+
+    @contextmanager
+    def test_get_connection():
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row  # Enable named column access
+        conn.execute("PRAGMA foreign_keys = ON")  # Enable foreign key constraints
+        try:
+            yield conn
+            conn.commit()  # Auto-commit on successful exit
+        except Exception:
+            conn.rollback()  # Rollback on error
+            raise
+        finally:
+            conn.close()
+
+    # Patch the get_connection function in user_db module
+    with patch('nuggit.util.user_db.get_connection', test_get_connection):
+        yield db_path
+
     # Cleanup
+    db.DB_PATH = original_db_path
     os.unlink(db_path)
-    if original_db_path:
-        os.environ['DATABASE_PATH'] = original_db_path
-    elif 'DATABASE_PATH' in os.environ:
-        del os.environ['DATABASE_PATH']
 
 
 class TestUserDatabase:
@@ -274,9 +292,9 @@ class TestUserDatabase:
         assert user['username'] == 'testuser'
         assert user['first_name'] == 'Test'
         assert user['last_name'] == 'User'
-        assert user['is_verified'] is False
-        assert user['is_active'] is True
-        assert user['is_admin'] is False
+        assert user['is_verified'] == 0  # SQLite returns 0/1 for boolean
+        assert user['is_active'] == 1
+        assert user['is_admin'] == 0
     
     def test_get_user_by_email(self, temp_db):
         """Test retrieving user by email."""
@@ -387,16 +405,20 @@ class TestEmailVerification:
         token = create_email_verification_token(user_id)
 
         result = verify_email_verification_token(token)
-        assert result is True
+        assert result == user_id  # Should return user ID
+
+        # Now actually verify the user's email
+        verify_success = verify_user_email(user_id)
+        assert verify_success is True
 
         # Check that user is now verified
         user = get_user_by_id(user_id)
-        assert user['is_verified'] is True
+        assert user['is_verified'] == 1  # SQLite returns 0/1 for boolean
 
     def test_verify_email_verification_token_invalid(self, temp_db):
         """Test verifying invalid email verification token."""
         result = verify_email_verification_token('invalid_token')
-        assert result is False
+        assert result is None  # Should return None for invalid token
 
     def test_verify_user_email_directly(self, temp_db):
         """Test directly verifying user email."""
@@ -412,14 +434,14 @@ class TestEmailVerification:
 
         # User should not be verified initially
         user = get_user_by_id(user_id)
-        assert user['is_verified'] is False
+        assert user['is_verified'] == 0  # SQLite returns 0/1 for boolean
 
         # Verify user
         verify_user_email(user_id)
 
         # User should now be verified
         user = get_user_by_id(user_id)
-        assert user['is_verified'] is True
+        assert user['is_verified'] == 1
 
 
 class TestPasswordReset:
