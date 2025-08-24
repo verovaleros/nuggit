@@ -185,12 +185,12 @@ def authenticate_user(email_or_username: str, password: str) -> Optional[Dict[st
     if not user['is_active']:
         return None
 
-    # Check if user email is verified
-    if not user['is_verified']:
-        return None
+    # Note: Email verification check is handled by the login endpoint
+    # to provide more specific error messages
 
-    # Update last login time
-    update_last_login(user['id'])
+    # Update last login time only if user is verified
+    if user['is_verified']:
+        update_last_login(user['id'])
     
     # Remove password hash from returned data
     user.pop('password_hash', None)

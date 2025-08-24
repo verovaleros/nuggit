@@ -409,6 +409,24 @@ def list_all_repositories() -> List[Dict[str, Any]]:
         return [dict(r) for r in conn.execute(query)]
 
 
+def list_user_repositories(user_id: int) -> List[Dict[str, Any]]:
+    """
+    List repositories owned by a specific user.
+
+    Args:
+        user_id (int): The ID of the user whose repositories to list.
+
+    Returns:
+        List[Dict[str, Any]]: A list of repository records owned by the user.
+
+    Raises:
+        sqlite3.Error: If the database query fails.
+    """
+    query = "SELECT * FROM repositories WHERE owner_id = ?"
+    with get_connection() as conn:
+        return [dict(r) for r in conn.execute(query, (user_id,))]
+
+
 def get_repository_history(repo_id: str) -> List[Dict[str, Any]]:
     """
     Get all history entries for a repository, newest first.
