@@ -2,6 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
   import TagInput from '../components/TagInput.svelte';
   import ErrorBoundary from '../components/ErrorBoundary.svelte';
+  import { apiClient, ApiError } from '../lib/api/apiClient.js';
+  import { authStore } from '../lib/stores/authStore.js';
   import {
     formatDateTime,
     formatRelativeTime,
@@ -9,6 +11,11 @@
     formatCompactDate,
     isValidDate
   } from '../lib/timezone.js';
+
+  // Auth state
+  $: authState = $authStore;
+  $: isAuthenticated = authState.isAuthenticated;
+  $: currentUser = authState.user;
 
   let repoId = null;
   let repo = null;
@@ -101,20 +108,13 @@
       const timeoutId = createTimeout(() => controller.abort(), 5000); // 5 second timeout
 
       try {
-        // Fetch repository details
-        const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`, {
-          signal: controller.signal
-        });
+        // Fetch repository details using API client
+        repo = await apiClient.getRepository(encodedRepoId);
 
         clearTimeout(timeoutId); // Clear the timeout if fetch completes
         activeTimeouts.delete(timeoutId);
         clearAbortController(controller);
 
-        if (!res.ok) {
-          throw new Error(await res.text());
-        }
-
-        repo = await res.json();
         tags = repo.tags ? repo.tags.join(',') : '';
         notes = repo.notes || '';
 
@@ -137,17 +137,9 @@
           error = 'Connection timed out. Loading repository from local database.';
           console.warn('Repository fetch timed out - trying to load from local database');
 
-          // Try again with a longer timeout - this will use the offline mode in the backend
+          // Try again with API client - this will use the offline mode in the backend
           try {
-            const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`, {
-              timeout: 10000 // Longer timeout for offline mode
-            });
-
-            if (!res.ok) {
-              throw new Error(await res.text());
-            }
-
-            repo = await res.json();
+            repo = await apiClient.getRepository(encodedRepoId);
             tags = repo.tags ? repo.tags.join(',') : '';
             notes = repo.notes || '';
             error = null; // Clear the error if we successfully loaded from DB
@@ -171,20 +163,7 @@
     saveStatus = 'Saving...';
     try {
       // Use the metadata endpoint for updating tags
-      // Encode the repository ID for the URL
-      const encodedRepoId = encodeURIComponent(repoId);
-
-      const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}/fields`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ tags, notes }) // Pass both tags and notes
-      });
-
-      if (!res.ok) {
-        throw new Error(await res.text());
-      }
+      await apiClient.updateRepositoryMetadata(repoId, { tags, notes });
 
       saveStatus = '✅ Saved!';
 
@@ -209,21 +188,13 @@
       const timeoutId = createTimeout(() => controller.abort(), 5000); // 5 second timeout
 
       try {
-        const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`, {
-          method: 'PUT',
-          signal: controller.signal
-        });
+        // Update repository using API client
+        const updateData = await apiClient.updateRepository(encodedRepoId, {});
 
         clearTimeout(timeoutId); // Clear the timeout if fetch completes
         activeTimeouts.delete(timeoutId);
         clearAbortController(controller);
 
-        if (!res.ok) {
-          throw new Error(await res.text());
-        }
-
-        // Parse the response from the update endpoint
-        const updateData = await res.json();
         console.log('Update response:', updateData);
       } catch (fetchErr) {
         if (fetchErr.name === 'AbortError') {
@@ -238,14 +209,8 @@
         // Encode the repository ID for the URL
         const encodedRepoId = encodeURIComponent(repoId);
 
-        const detailRes = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`);
-
-        if (!detailRes.ok) {
-          throw new Error(await detailRes.text());
-        }
-
         // Update the repository data with the latest information
-        repo = await detailRes.json();
+        repo = await apiClient.getRepository(encodedRepoId);
         console.log('Updated repository details:', repo);
 
         // Update the tags from the updated repository
@@ -284,16 +249,8 @@
 
   async function deleteRepository() {
     try {
-      // Encode the repository ID for the URL
-      const encodedRepoId = encodeURIComponent(repoId);
-
-      const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`, {
-        method: 'DELETE'
-      });
-
-      if (!res.ok) {
-        throw new Error(await res.text());
-      }
+      // Delete repository using API client
+      await apiClient.deleteRepository(repoId);
 
       // Redirect to home page after successful deletion
       window.location.hash = '';
@@ -726,26 +683,11 @@
     commentStatus = 'Adding comment...';
 
     try {
-      // Encode the repository ID for the URL
-      const encodedRepoId = encodeURIComponent(repoId);
-
-      const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}/comments`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          comment: newComment.trim(),
-          author: commentAuthor.trim() || 'Anonymous'
-        })
+      // Add comment using API client
+      const newCommentData = await apiClient.addRepositoryComment(repoId, {
+        comment: newComment.trim(),
+        author: commentAuthor.trim() || 'Anonymous'
       });
-
-      if (!res.ok) {
-        throw new Error(await res.text());
-      }
-
-      // Get the new comment
-      const newCommentData = await res.json();
 
       // Add the new comment to the list
       repo.comments = [newCommentData, ...repo.comments];
@@ -786,6 +728,74 @@
     max-width: 1200px;
     margin: 2rem auto;
     font-family: sans-serif;
+  }
+
+  /* Authentication Message Styles */
+  .auth-message {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 60vh;
+  }
+
+  .auth-card {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    padding: 3rem;
+    text-align: center;
+    max-width: 400px;
+    width: 100%;
+  }
+
+  .auth-card h2 {
+    color: #333;
+    margin-bottom: 1rem;
+    font-size: 1.5rem;
+  }
+
+  .auth-card p {
+    color: #666;
+    margin-bottom: 2rem;
+    line-height: 1.6;
+  }
+
+  .auth-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+  }
+
+  .btn {
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    border: none;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  }
+
+  .btn-outline {
+    background: transparent;
+    color: #667eea;
+    border: 2px solid #667eea;
+  }
+
+  .btn-outline:hover {
+    background: #667eea;
+    color: white;
   }
 
   h1, h2 {
@@ -1693,7 +1703,19 @@
       <span>+</span> Add Repositories
     </button>
   </div>
-  {#if loading}
+  {#if !isAuthenticated}
+    <!-- Unauthenticated User Message -->
+    <div class="auth-message">
+      <div class="auth-card">
+        <h2>🔐 Authentication Required</h2>
+        <p>Please sign in to view repository details and manage your data.</p>
+        <div class="auth-actions">
+          <a href="#/login" class="btn btn-primary">Sign In</a>
+          <a href="#/register" class="btn btn-outline">Create Account</a>
+        </div>
+      </div>
+    </div>
+  {:else if loading}
     <div style="text-align: center; padding: 3rem 0;">
       <h1>Loading repository data…</h1>
     </div>
