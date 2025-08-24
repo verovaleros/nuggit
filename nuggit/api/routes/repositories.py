@@ -11,6 +11,7 @@ from github import GithubException
 
 from nuggit.util.db import (
     list_all_repositories,
+    list_user_repositories,
     insert_or_update_repo,
     get_repository,
     delete_repository as db_delete_repository,
@@ -29,6 +30,27 @@ from nuggit.api.routes.auth import get_current_user, require_auth
 router = APIRouter()
 
 # -- Shared Helpers ---------------------------------------------------------
+
+def check_repository_access(repo: dict, current_user: dict) -> bool:
+    """
+    Check if the current user has access to the repository.
+
+    Args:
+        repo: Repository data from database
+        current_user: Current authenticated user (can be None if not authenticated)
+
+    Returns:
+        bool: True if user has access, False otherwise
+    """
+    if not repo or not current_user:
+        return False
+
+    # Admin users can access all repositories
+    if current_user.get("is_admin", False):
+        return True
+
+    # Regular users can only access their own repositories
+    return repo.get("owner_id") == current_user.get("id")
 
 def retry_github(
     fn: Callable[..., Dict[str, Any]],
@@ -189,40 +211,71 @@ class RepositoryMetadataUpdate(BaseModel):
 
 # -- Routes ----------------------------------------------------------------
 
-@router.get("/", summary="List all repositories")
-def list_repositories():
+@router.get("/", summary="List repositories")
+def list_repositories(current_user: dict = Depends(get_current_user)):
     """
-    List all repositories in the database.
+    List repositories accessible to the current user.
+
+    Admin users see all repositories, regular users see only their own.
+
+    Args:
+        current_user: The authenticated user from JWT token.
 
     Returns:
-        dict: A mapping with a 'repositories' key containing all records.
+        dict: A mapping with a 'repositories' key containing accessible records.
 
     Raises:
-        HTTPException: 500 if retrieval fails.
+        HTTPException: 401 if not authenticated, 500 if retrieval fails.
     """
     try:
-        return {"repositories": list_all_repositories()}
+        # Handle case where current_user is None (unauthenticated request)
+        if not current_user:
+            logging.warning("Unauthenticated request to list repositories")
+            raise HTTPException(status_code=401, detail="Authentication required")
+
+        if current_user.get("is_admin", False):
+            # Admin users see all repositories
+            repositories = list_all_repositories()
+        else:
+            # Regular users see only their own repositories
+            repositories = list_user_repositories(current_user["id"])
+
+        return {"repositories": repositories}
+    except HTTPException:
+        # Re-raise HTTP exceptions (like 401)
+        raise
     except Exception as e:
-        logging.error(f"Error listing repositories: {e}")
+        user_id = current_user.get("id") if current_user else "unknown"
+        logging.error(f"Error listing repositories for user {user_id}: {e}")
         raise database_error("Failed to retrieve repositories")
 
 
 @router.get("/check/{repo_id:path}", summary="Check if a repository exists")
-def check_repository(repo_id: str):
+def check_repository(repo_id: str, current_user: dict = Depends(get_current_user)):
     """
-    Check if a repository exists in the database.
+    Check if a repository exists in the database and if the user has access to it.
+
+    Requires authentication. Users can only check their own repositories unless they are admin.
 
     Args:
         repo_id (str): Identifier in the format 'owner/name'.
+        current_user: The authenticated user from JWT token.
 
     Returns:
-        dict: Contains 'exists' (bool) and 'repository' data if found.
+        dict: Contains 'exists' (bool) and 'repository' data if found and accessible.
 
     Raises:
+        HTTPException: 401 if not authenticated.
         HTTPException: 500 if an error occurs during lookup.
     """
     try:
         repo = get_repository(repo_id)
+
+        # Check if user has access to this repository
+        if repo and not check_repository_access(repo, current_user):
+            # Return false for repositories the user can't access
+            return {"exists": False, "repository": None}
+
         return {"exists": bool(repo), "repository": repo}
     except Exception as e:
         logging.error(f"Error checking repository {repo_id}: {e}")
@@ -393,23 +446,35 @@ def batch_import(batch: BatchRepositoryInput, current_user: dict = Depends(requi
 def update_metadata(
     repo_id: str,
     meta: RepositoryMetadataUpdate = Body(...),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Update metadata (tags and notes) for a repository.
 
+    Requires authentication. Users can only update their own repositories unless they are admin.
+
     Args:
         repo_id (str): Identifier in the format 'owner/name'.
         meta (RepositoryMetadataUpdate): Contains new tags and notes.
+        current_user: The authenticated user from JWT token.
 
     Returns:
         dict: Message and updated repository data.
 
     Raises:
+        HTTPException: 401 if not authenticated.
+        HTTPException: 403 if user doesn't have access to this repository.
         HTTPException: 404 if repo not found.
         HTTPException: 500 if metadata update fails.
     """
-    if not get_repository(repo_id):
+    repo = get_repository(repo_id)
+    if not repo:
         raise HTTPException(404, f"{repo_id} not found")
+
+    # Check if user has access to this repository
+    if not check_repository_access(repo, current_user):
+        raise HTTPException(403, "You don't have access to this repository")
+
     if not update_repository_metadata(repo_id, meta.tags, meta.notes):
         raise HTTPException(500, "Metadata update failed")
     return {"message": f"Metadata for '{repo_id}' updated.", "repository": get_repository(repo_id)}
@@ -422,18 +487,24 @@ def update_metadata(
 def update_fields(
     repo_id: str,
     fields: RepositoryFieldsUpdate = Body(...),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Update specific fields of a repository.
 
+    Requires authentication. Users can only update their own repositories unless they are admin.
+
     Args:
         repo_id (str): Identifier in the format 'owner/name'.
         fields (RepositoryFieldsUpdate): Fields to update.
+        current_user: The authenticated user from JWT token.
 
     Returns:
         dict: Message and updated repository data.
 
     Raises:
+        HTTPException: 401 if not authenticated.
+        HTTPException: 403 if user doesn't have access to this repository.
         HTTPException: 404 if repo not found.
         HTTPException: 400 if no fields provided.
         HTTPException: 500 if update fails.
@@ -441,6 +512,11 @@ def update_fields(
     existing = get_repository(repo_id)
     if not existing:
         raise HTTPException(404, f"{repo_id} not found")
+
+    # Check if user has access to this repository
+    if not check_repository_access(existing, current_user):
+        raise HTTPException(403, "You don't have access to this repository")
+
     data_to_update = {k: v for k, v in fields.dict().items() if v is not None}
     if not data_to_update:
         raise HTTPException(400, "No fields to update")
@@ -450,22 +526,32 @@ def update_fields(
 
 
 @router.delete("/{repo_id:path}", summary="Delete a repository from the database")
-def delete_repository(repo_id: str):
+def delete_repository(repo_id: str, current_user: dict = Depends(get_current_user)):
     """
     Delete a repository from the database.
 
+    Requires authentication. Users can only delete their own repositories unless they are admin.
+
     Args:
         repo_id (str): Identifier in the format 'owner/name'.
+        current_user: The authenticated user from JWT token.
 
     Returns:
         dict: Message indicating deletion result.
 
     Raises:
+        HTTPException: 401 if not authenticated.
+        HTTPException: 403 if user doesn't have access to this repository.
         HTTPException: 404 if repo not found.
         HTTPException: 500 if delete fails.
     """
-    if not get_repository(repo_id):
+    repo = get_repository(repo_id)
+    if not repo:
         raise HTTPException(404, f"{repo_id} not found")
+
+    # Check if user has access to this repository
+    if not check_repository_access(repo, current_user):
+        raise HTTPException(403, "You don't have access to this repository")
     if not db_delete_repository(repo_id):
         raise HTTPException(500, "Delete failed")
     return {"message": f"Repository '{repo_id}' deleted successfully."}

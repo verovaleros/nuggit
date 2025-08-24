@@ -4,7 +4,7 @@ import asyncio
 from functools import lru_cache
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Body, Query, status
+from fastapi import APIRouter, HTTPException, Body, Query, status, Depends
 from pydantic import BaseModel
 from github import Github, GithubException
 
@@ -16,9 +16,32 @@ from nuggit.util.async_db import (
     get_versions as db_get_versions,
 )
 from nuggit.util.github import get_recent_commits
+from nuggit.api.routes.auth import get_current_user
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def check_repository_access(repo: dict, current_user: dict) -> bool:
+    """
+    Check if the current user has access to the repository.
+
+    Args:
+        repo: Repository data from database
+        current_user: Current authenticated user (can be None if not authenticated)
+
+    Returns:
+        bool: True if user has access, False otherwise
+    """
+    if not repo or not current_user:
+        return False
+
+    # Admin users can access all repositories
+    if current_user.get("is_admin", False):
+        return True
+
+    # Regular users can only access their own repositories
+    return repo.get("owner_id") == current_user.get("id")
 
 
 @lru_cache()
@@ -189,18 +212,24 @@ async def fetch_recent_commits(
 async def get_repository_commits(
     repo_id: str,
     limit: int = Query(10, description="Maximum number of commits to return"),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Get recent commits for a repository.
 
+    Requires authentication. Users can only access commits for their own repositories unless they are admin.
+
     Args:
         repo_id (str): The ID of the repository.
         limit (int, optional): Maximum number of commits to return. Defaults to 10.
+        current_user: The authenticated user from JWT token.
 
     Returns:
         List[CommitSchema]: A list of recent commits.
 
     Raises:
+        HTTPException (401): If not authenticated.
+        HTTPException (403): If user doesn't have access to this repository.
         HTTPException (404): If the repository is not found.
         HTTPException (500): If commits retrieval fails.
     """
@@ -219,6 +248,13 @@ async def get_repository_commits(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Repository not found"
+        )
+
+    # Check if user has access to this repository
+    if not check_repository_access(repo, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this repository"
         )
 
     # Check if we can connect to GitHub
@@ -304,13 +340,17 @@ async def update_repo_metadata(
 async def add_repository_comment(
     repo_id: str,
     comment_data: CommentCreate = Body(...),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Add a comment to a repository.
 
+    Requires authentication. Users can only add comments to their own repositories unless they are admin.
+
     Args:
         repo_id (str): The ID of the repository.
         comment_data (CommentCreate): The comment payload.
+        current_user: The authenticated user from JWT token.
 
     Returns:
         CommentResponse: The newly created comment.
@@ -329,6 +369,13 @@ async def add_repository_comment(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Repository not found"
+        )
+
+    # Check if user has access to this repository
+    if not check_repository_access(repo, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this repository"
         )
 
     try:
@@ -361,13 +408,17 @@ async def add_repository_comment(
 async def get_repository_comments(
     repo_id: str,
     limit: int = Query(20, description="Maximum number of comments to return"),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Get comments for a repository.
 
+    Requires authentication. Users can only access comments for their own repositories unless they are admin.
+
     Args:
         repo_id (str): The ID of the repository.
         limit (int, optional): Maximum number of comments to return. Defaults to 20.
+        current_user: The authenticated user from JWT token.
 
     Returns:
         List[CommentResponse]: A list of comments.
@@ -388,6 +439,13 @@ async def get_repository_comments(
             detail="Repository not found"
         )
 
+    # Check if user has access to this repository
+    if not check_repository_access(repo, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this repository"
+        )
+
     try:
         comments = await db_get_comments(decoded_repo_id)
         return [CommentResponse(**c) for c in comments[:limit]]
@@ -405,12 +463,18 @@ async def get_repository_comments(
     response_model=RepositoryDetail,
     summary="Get a single repository by ID",
 )
-async def get_repository_detail(repo_id: str):
+async def get_repository_detail(
+    repo_id: str,
+    current_user: dict = Depends(get_current_user)
+):
     """
     Retrieve full repository info, including recent commits, comments, and versions.
 
+    Requires authentication. Users can only access their own repositories unless they are admin.
+
     Args:
         repo_id (str): Unique owner/repo identifier (e.g., "octocat/Hello-World").
+        current_user: The authenticated user from JWT token.
 
     Returns:
         RepositoryDetail: A Pydantic model containing:
@@ -423,6 +487,8 @@ async def get_repository_detail(repo_id: str):
             - versions: list of VersionSchema
 
     Raises:
+        HTTPException (401): If not authenticated.
+        HTTPException (403): If user doesn't have access to this repository.
         HTTPException (404): If repository with `repo_id` does not exist.
     """
     # URL-decode the repository ID to handle URL-encoded slashes
@@ -435,6 +501,13 @@ async def get_repository_detail(repo_id: str):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Repository not found"
+        )
+
+    # Check if user has access to this repository
+    if not check_repository_access(repo_data, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this repository"
         )
 
     # Check if we can connect to GitHub
