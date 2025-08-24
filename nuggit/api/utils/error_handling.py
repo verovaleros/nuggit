@@ -359,3 +359,21 @@ def database_error(message: str = "A database error occurred") -> HTTPException:
         message=message,
         status_code=500
     )
+
+
+def authentication_error(message: str = "Authentication required") -> HTTPException:
+    """Create an authentication error exception."""
+    return create_http_exception(
+        error_code=ErrorCode.UNAUTHORIZED,
+        message=message,
+        status_code=401
+    )
+
+
+def not_found_error(message: str = "Resource not found") -> HTTPException:
+    """Create a not found error exception."""
+    return create_http_exception(
+        error_code=ErrorCode.REPOSITORY_NOT_FOUND,  # Generic not found error
+        message=message,
+        status_code=404
+    )

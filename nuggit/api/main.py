@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 from nuggit.api.routes import repositories
 from nuggit.api.routes import detail
 from nuggit.api.routes import health
+import nuggit.api.routes.auth as auth
 import nuggit.api.routes.versions as versions
 from nuggit.api.utils.error_handling import (
     NuggitException, handle_validation_error, handle_generic_error,
@@ -109,6 +110,8 @@ async def generic_exception_handler(request: Request, exc: Exception):
 # Note: Order matters! More specific routes should come before general ones
 # Health and monitoring routes
 app.include_router(health.router, prefix="/health", tags=["health"])
+# Authentication routes
+app.include_router(auth.router, prefix="/auth", tags=["authentication"])
 # repositories.router has the root "/" route and specific routes like "/check/{repo_id:path}"
 app.include_router(repositories.router, prefix="/repositories", tags=["repositories"])
 # versions.router has specific routes like "/{repo_id:path}/versions"
