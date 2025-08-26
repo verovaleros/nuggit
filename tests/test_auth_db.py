@@ -27,10 +27,6 @@ def temp_db():
     db_fd, db_path = tempfile.mkstemp(suffix='.db')
     os.close(db_fd)
     
-    # Set environment variable for database path
-    original_db_path = os.environ.get('DATABASE_PATH')
-    os.environ['DATABASE_PATH'] = db_path
-    
     # Initialize database with schema
     conn = sqlite3.connect(db_path)
     
@@ -106,15 +102,31 @@ def temp_db():
     
     conn.commit()
     conn.close()
-    
-    yield db_path
-    
+
+    # Create a context manager for our test database
+    from contextlib import contextmanager
+
+    @contextmanager
+    def test_get_connection():
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row  # Enable named column access
+        conn.execute("PRAGMA foreign_keys = ON")  # Enable foreign key constraints
+        try:
+            yield conn
+            conn.commit()  # Auto-commit on successful exit
+        except Exception:
+            conn.rollback()  # Rollback on error
+            raise
+        finally:
+            conn.close()
+
+    # Patch the get_connection function in user_db module
+    from unittest.mock import patch
+    with patch('nuggit.util.user_db.get_connection', test_get_connection):
+        yield db_path
+
     # Cleanup
     os.unlink(db_path)
-    if original_db_path:
-        os.environ['DATABASE_PATH'] = original_db_path
-    elif 'DATABASE_PATH' in os.environ:
-        del os.environ['DATABASE_PATH']
 
 
 class TestUserDatabaseOperations:
@@ -248,10 +260,9 @@ class TestUserDatabaseOperations:
         )
         
         # Deactivate one user
-        conn = sqlite3.connect(os.environ.get('DATABASE_PATH'))
-        conn.execute("UPDATE users SET is_active = FALSE WHERE id = ?", (user2_id,))
-        conn.commit()
-        conn.close()
+        from nuggit.util.user_db import get_connection
+        with get_connection() as conn:
+            conn.execute("UPDATE users SET is_active = FALSE WHERE id = ?", (user2_id,))
         
         # Filter for active users only
         result = get_users_list(is_active=True)
@@ -381,18 +392,18 @@ class TestTokenManagement:
         token = create_email_verification_token(user_id)
         
         # Manually expire the token
-        conn = sqlite3.connect(os.environ.get('DATABASE_PATH'))
-        expired_time = datetime.now() - timedelta(hours=1)
-        conn.execute(
-            "UPDATE email_verification_tokens SET expires_at = ? WHERE token = ?",
-            (expired_time.isoformat(), token)
-        )
-        conn.commit()
-        conn.close()
+        from nuggit.util.user_db import get_connection
+        from datetime import timezone
+        with get_connection() as conn:
+            expired_time = datetime.now(timezone.utc) - timedelta(hours=1)
+            conn.execute(
+                "UPDATE email_verification_tokens SET expires_at = ? WHERE token = ?",
+                (expired_time.isoformat(), token)
+            )
         
         # Try to verify expired token
         result = verify_email_verification_token(token)
-        assert result is False
+        assert result is None
     
     def test_password_reset_token_expiration(self, temp_db):
         """Test password reset token expiration."""
@@ -408,14 +419,14 @@ class TestTokenManagement:
         token = create_password_reset_token(user_id)
         
         # Manually expire the token
-        conn = sqlite3.connect(os.environ.get('DATABASE_PATH'))
-        expired_time = datetime.now() - timedelta(hours=1)
-        conn.execute(
-            "UPDATE password_reset_tokens SET expires_at = ? WHERE token = ?",
-            (expired_time.isoformat(), token)
-        )
-        conn.commit()
-        conn.close()
+        from nuggit.util.user_db import get_connection
+        from datetime import timezone
+        with get_connection() as conn:
+            expired_time = datetime.now(timezone.utc) - timedelta(hours=1)
+            conn.execute(
+                "UPDATE password_reset_tokens SET expires_at = ? WHERE token = ?",
+                (expired_time.isoformat(), token)
+            )
         
         # Try to verify expired token
         result = verify_password_reset_token(token)
