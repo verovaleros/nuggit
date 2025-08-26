@@ -28,6 +28,10 @@ class TestDatabase(unittest.TestCase):
         # Create a temporary file for the test database
         self.temp_db_fd, self.temp_db_path = tempfile.mkstemp()
 
+        # Close any existing connection pool to ensure clean state
+        from nuggit.util.connection_pool import close_connection_pool
+        close_connection_pool()
+
         # Patch the DB_PATH to use our temporary database
         self.db_path_patcher = patch('nuggit.util.db.DB_PATH', Path(self.temp_db_path))
         self.mock_db_path = self.db_path_patcher.start()
@@ -80,6 +84,10 @@ class TestDatabase(unittest.TestCase):
         """Clean up after tests."""
         # Stop the patcher
         self.db_path_patcher.stop()
+
+        # Close connection pool to ensure clean state for next test
+        from nuggit.util.connection_pool import close_connection_pool
+        close_connection_pool()
 
         # Close and remove the temporary database
         os.close(self.temp_db_fd)
