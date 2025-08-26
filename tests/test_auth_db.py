@@ -18,6 +18,7 @@ from nuggit.util.user_db import (
     verify_password_reset_token, UserAlreadyExistsError
 )
 from nuggit.util.db import insert_or_update_repo, get_repository
+from nuggit.util.timezone import now_utc, UTC
 
 
 @pytest.fixture
@@ -393,9 +394,8 @@ class TestTokenManagement:
         
         # Manually expire the token
         from nuggit.util.user_db import get_connection
-        from datetime import timezone
         with get_connection() as conn:
-            expired_time = datetime.now(timezone.utc) - timedelta(hours=1)
+            expired_time = now_utc() - timedelta(hours=1)
             conn.execute(
                 "UPDATE email_verification_tokens SET expires_at = ? WHERE token = ?",
                 (expired_time.isoformat(), token)
@@ -420,9 +420,8 @@ class TestTokenManagement:
         
         # Manually expire the token
         from nuggit.util.user_db import get_connection
-        from datetime import timezone
         with get_connection() as conn:
-            expired_time = datetime.now(timezone.utc) - timedelta(hours=1)
+            expired_time = now_utc() - timedelta(hours=1)
             conn.execute(
                 "UPDATE password_reset_tokens SET expires_at = ? WHERE token = ?",
                 (expired_time.isoformat(), token)
