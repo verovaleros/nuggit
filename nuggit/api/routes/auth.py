@@ -158,14 +158,25 @@ async def login_user(login_data: UserLoginRequest):
     Validates user credentials and returns JWT access and refresh tokens.
     """
     try:
-        # Authenticate user
+        # First, check if user exists and get their verification status
+        user_by_email = get_user_by_email(login_data.email_or_username)
+        if not user_by_email:
+            from nuggit.util.user_db import get_user_by_username
+            user_by_email = get_user_by_username(login_data.email_or_username)
+
+        # If user exists but is not verified, provide specific error
+        if user_by_email and not user_by_email['is_verified']:
+            # Still need to verify password to avoid user enumeration
+            from nuggit.util.auth import verify_password
+            if verify_password(login_data.password, user_by_email['password_hash']):
+                raise authentication_error("Please verify your email address before logging in")
+            else:
+                raise authentication_error("Invalid email/username or password")
+
+        # Authenticate user (will return None for unverified users)
         user = authenticate_user(login_data.email_or_username, login_data.password)
         if not user:
             raise authentication_error("Invalid email/username or password")
-        
-        # Check if email is verified
-        if not user['is_verified']:
-            raise authentication_error("Please verify your email address before logging in")
         
         # Create tokens with longer expiration
         from nuggit.util.auth import ACCESS_TOKEN_EXPIRE_MINUTES

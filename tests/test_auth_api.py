@@ -333,7 +333,7 @@ class TestLoginAPI:
         assert response.status_code == 401
         data = response.json()
         assert data["error"] is True
-        assert "Invalid email/username or password" in data["message"]
+        assert "Please verify your email address before logging in" in data["message"]
     
     def test_login_nonexistent_user(self, client, temp_db):
         """Test login with nonexistent user."""
