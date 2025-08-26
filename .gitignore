@@ -22,3 +22,8 @@ nuggit/nuggit.db-shm
 nuggit/nuggit.db-wal
 debug_commits.py
 tests/test_data_integrity.py
+*.pyc
+__pycache__/
+.pytest_cache/
+coverage.xml
+nuggit/scripts/
