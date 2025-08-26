@@ -109,7 +109,8 @@ class GitHubAPIClient:
                 # Use the rate_limit object directly if it has the needed attributes
                 if hasattr(rate_limit, 'limit'):
                     core = rate_limit
-                    search = rate_limit  # Use same for both if no separate search
+                    # Use default search rate limit values if no separate search info is available
+                    search = None
                 else:
                     # If we can't determine the structure, create default values
                     logger.debug("Unable to determine rate limit structure, using defaults")
@@ -131,12 +132,18 @@ class GitHubAPIClient:
             )
 
             # Update search rate limit
-            self._rate_limit_cache[RateLimitType.SEARCH] = RateLimitInfo(
-                limit=search.limit,
-                remaining=search.remaining,
-                reset_time=search.reset,
-                used=search.limit - search.remaining
-            )
+            if search is not None:
+                self._rate_limit_cache[RateLimitType.SEARCH] = RateLimitInfo(
+                    limit=search.limit,
+                    remaining=search.remaining,
+                    reset_time=search.reset,
+                    used=search.limit - search.remaining
+                )
+            else:
+                # Use default search rate limit values if no separate search info is available
+                self._rate_limit_cache[RateLimitType.SEARCH] = RateLimitInfo(
+                    limit=30, remaining=30, reset_time=int(now.timestamp()) + 3600, used=0
+                )
 
             self._last_rate_limit_check = now
 
