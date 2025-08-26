@@ -50,7 +50,7 @@ def check_repository_access(repo: dict, current_user: dict) -> bool:
         return True
 
     # Regular users can only access their own repositories
-    return repo.get("owner_id") == current_user.get("id")
+    return repo.get("user_id") == current_user.get("id")
 
 def retry_github(
     fn: Callable[..., Dict[str, Any]],
@@ -318,6 +318,48 @@ def add_repository(
     }
 
 
+# METADATA ROUTE MOVED HERE TO COME BEFORE GENERAL ROUTE
+@router.put(
+    "/{repo_id:path}/metadata/",
+    summary="Update repository metadata (tags and notes)"
+)
+def update_metadata(
+    repo_id: str,
+    meta: RepositoryMetadataUpdate = Body(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Update metadata (tags and notes) for a repository.
+
+    Requires authentication. Users can only update their own repositories unless they are admin.
+
+    Args:
+        repo_id (str): Identifier in the format 'owner/name'.
+        meta (RepositoryMetadataUpdate): Contains new tags and notes.
+        current_user: The authenticated user from JWT token.
+
+    Returns:
+        dict: Message and updated repository data.
+
+    Raises:
+        HTTPException: 401 if not authenticated.
+        HTTPException: 403 if user doesn't have access to this repository.
+        HTTPException: 404 if repo not found.
+        HTTPException: 500 if metadata update fails.
+    """
+    repo = get_repository(repo_id)
+    if not repo:
+        raise HTTPException(404, f"{repo_id} not found")
+
+    # Check if user has access to this repository
+    if not check_repository_access(repo, current_user):
+        raise HTTPException(403, "You don't have access to this repository")
+
+    if not update_repository_metadata(repo_id, meta.tags, meta.notes):
+        raise HTTPException(500, "Metadata update failed")
+    return {"message": f"Metadata for '{repo_id}' updated.", "repository": get_repository(repo_id)}
+
+
 @router.put("/{repo_id:path}", summary="Update repository information from GitHub")
 def update_repository(
     repo_id: str,
@@ -439,45 +481,7 @@ def batch_import(batch: BatchRepositoryInput, current_user: dict = Depends(requi
     }
 
 
-@router.put(
-    "/{repo_id:path}/metadata/",
-    summary="Update repository metadata (tags and notes)"
-)
-def update_metadata(
-    repo_id: str,
-    meta: RepositoryMetadataUpdate = Body(...),
-    current_user: dict = Depends(get_current_user),
-):
-    """
-    Update metadata (tags and notes) for a repository.
-
-    Requires authentication. Users can only update their own repositories unless they are admin.
-
-    Args:
-        repo_id (str): Identifier in the format 'owner/name'.
-        meta (RepositoryMetadataUpdate): Contains new tags and notes.
-        current_user: The authenticated user from JWT token.
-
-    Returns:
-        dict: Message and updated repository data.
-
-    Raises:
-        HTTPException: 401 if not authenticated.
-        HTTPException: 403 if user doesn't have access to this repository.
-        HTTPException: 404 if repo not found.
-        HTTPException: 500 if metadata update fails.
-    """
-    repo = get_repository(repo_id)
-    if not repo:
-        raise HTTPException(404, f"{repo_id} not found")
-
-    # Check if user has access to this repository
-    if not check_repository_access(repo, current_user):
-        raise HTTPException(403, "You don't have access to this repository")
-
-    if not update_repository_metadata(repo_id, meta.tags, meta.notes):
-        raise HTTPException(500, "Metadata update failed")
-    return {"message": f"Metadata for '{repo_id}' updated.", "repository": get_repository(repo_id)}
+# Duplicate metadata route removed - moved to before general route
 
 
 @router.patch(

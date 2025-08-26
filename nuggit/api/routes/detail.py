@@ -15,6 +15,8 @@ from nuggit.util.async_db import (
     get_comments as db_get_comments,
     get_versions as db_get_versions,
 )
+from nuggit.util.db import get_repository
+from nuggit.api.routes.auth import get_current_user
 from nuggit.util.github import get_recent_commits
 from nuggit.api.routes.auth import get_current_user
 
@@ -41,7 +43,7 @@ def check_repository_access(repo: dict, current_user: dict) -> bool:
         return True
 
     # Regular users can only access their own repositories
-    return repo.get("owner_id") == current_user.get("id")
+    return repo.get("user_id") == current_user.get("id")
 
 
 @lru_cache()
@@ -284,52 +286,7 @@ async def get_repository_commits(
 # MOVED TO END OF FILE TO AVOID CATCHING SPECIFIC ROUTES
 
 
-@router.put(
-    "/{repo_id:path}/metadata",
-    response_model=MessageResponse,
-    summary="Update repository metadata (tags and notes)",
-)
-async def update_repo_metadata(
-    repo_id: str,
-    data: RepoMetadataUpdate = Body(...),
-):
-    """
-    Update the metadata (tags and notes) of a repository.
-
-    Args:
-        repo_id (str): The ID of the repository.
-        data (RepoMetadataUpdate): The new metadata to apply.
-
-    Returns:
-        MessageResponse: A message indicating the result of the update.
-
-    Raises:
-        HTTPException (404): If the repository is not found.
-        HTTPException (500): If the update fails unexpectedly.
-    """
-    # URL-decode the repository ID to handle URL-encoded slashes
-    import urllib.parse
-    decoded_repo_id = urllib.parse.unquote(repo_id)
-    logger.info(f"Updating metadata for repository with ID: {decoded_repo_id} (original: {repo_id})")
-
-    try:
-        success = await db_update_repository_metadata(
-            decoded_repo_id, data.tags, data.notes
-        )
-    except Exception as e:
-        logger.error(f"Error updating metadata for {decoded_repo_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update metadata"
-        )
-
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Repository not found"
-        )
-
-    return MessageResponse(message="Repository metadata updated")
+# Metadata endpoint removed - using repositories.py endpoint instead to avoid routing conflicts
 
 
 @router.post(

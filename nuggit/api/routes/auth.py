@@ -167,10 +167,12 @@ async def login_user(login_data: UserLoginRequest):
         if not user['is_verified']:
             raise authentication_error("Please verify your email address before logging in")
         
-        # Create tokens
-        access_token_expires = timedelta(minutes=30)
+        # Create tokens with longer expiration
+        from nuggit.util.auth import ACCESS_TOKEN_EXPIRE_MINUTES
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
         if login_data.remember_me:
-            access_token_expires = timedelta(hours=24)
+            # If remember me is checked, use even longer expiration (30 days)
+            access_token_expires = timedelta(days=30)
         
         access_token = create_access_token(
             user_id=user['id'],
@@ -234,18 +236,22 @@ async def refresh_token(refresh_data: TokenRefreshRequest):
         if not user or not user['is_active']:
             raise authentication_error("Invalid refresh token")
         
-        # Create new access token
+        # Create new access token with proper expiration
+        from nuggit.util.auth import ACCESS_TOKEN_EXPIRE_MINUTES
+        access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+
         access_token = create_access_token(
             user_id=user['id'],
             email=user['email'],
             username=user['username'],
-            is_admin=user['is_admin']
+            is_admin=user['is_admin'],
+            expires_delta=access_token_expires
         )
-        
+
         return {
             "access_token": access_token,
             "token_type": "bearer",
-            "expires_in": 1800  # 30 minutes
+            "expires_in": int(access_token_expires.total_seconds())
         }
         
     except (TokenExpiredError, InvalidTokenError):
@@ -379,6 +385,101 @@ async def get_current_user_profile(current_user: dict = Depends(require_auth)):
     )
 
 
+@router.patch("/me", response_model=UserProfile)
+async def update_current_user_profile(
+    update_data: dict,
+    current_user: dict = Depends(require_auth)
+):
+    """
+    Update current user's profile information.
+
+    Allows users to update their own profile data like first_name, last_name, etc.
+    """
+    try:
+        from nuggit.util.db import get_connection
+
+        # Validate update data - only allow certain fields to be updated
+        allowed_fields = ['first_name', 'last_name']
+        update_fields = {k: v for k, v in update_data.items() if k in allowed_fields}
+
+        if not update_fields:
+            raise validation_error("No valid fields to update")
+
+        # Update user in database
+        with get_connection() as conn:
+            set_clause = ", ".join([f"{field} = ?" for field in update_fields.keys()])
+            values = list(update_fields.values()) + [current_user['id']]
+
+            conn.execute(f"""
+                UPDATE users
+                SET {set_clause}, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, values)
+            conn.commit()
+
+        # Get updated user data
+        updated_user = get_user_by_id(current_user['id'])
+
+        logger.info(f"User {current_user['username']} updated profile: {update_fields}")
+
+        return UserProfile(
+            id=updated_user['id'],
+            email=updated_user['email'],
+            username=updated_user['username'],
+            first_name=updated_user['first_name'],
+            last_name=updated_user['last_name'],
+            is_verified=updated_user['is_verified'],
+            is_active=updated_user['is_active'],
+            is_admin=updated_user['is_admin'],
+            created_at=updated_user['created_at'],
+            updated_at=updated_user['updated_at'],
+            last_login_at=updated_user['last_login_at']
+        )
+
+    except Exception as e:
+        logger.error(f"Error updating profile for user {current_user['id']}: {e}")
+        raise internal_server_error("Failed to update profile")
+
+
+@router.post("/change-password", response_model=AuthResponse)
+async def change_password(
+    password_data: dict,
+    current_user: dict = Depends(require_auth)
+):
+    """
+    Change current user's password.
+
+    Requires current password for verification and sets new password.
+    """
+    try:
+        current_password = password_data.get('current_password')
+        new_password = password_data.get('new_password')
+
+        if not current_password or not new_password:
+            raise validation_error("Current password and new password are required")
+
+        # Verify current password
+        user = authenticate_user(current_user['email'], current_password)
+        if not user:
+            raise authentication_error("Current password is incorrect")
+
+        # Update password
+        if update_user_password(current_user['id'], new_password):
+            logger.info(f"Password changed for user: {current_user['username']}")
+            return AuthResponse(
+                success=True,
+                message="Password changed successfully"
+            )
+        else:
+            raise internal_server_error("Failed to update password")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Password change failed for user {current_user['id']}: {e}")
+        raise internal_server_error("Password change failed")
+
+
 # Admin routes
 @router.get("/admin/users", response_model=UserListResponse)
 async def get_users_list_admin(
@@ -464,3 +565,121 @@ async def get_user_admin(
     except Exception as e:
         logger.error(f"Failed to get user {user_id}: {e}")
         raise internal_server_error("Failed to retrieve user details")
+
+
+@router.get("/admin/stats", response_model=dict)
+async def get_admin_stats(current_user: dict = Depends(require_admin)):
+    """
+    Get admin dashboard statistics.
+
+    Returns system-wide statistics for the admin dashboard.
+    """
+    try:
+        from nuggit.util.db import get_connection
+
+        with get_connection() as conn:
+            # Get user statistics
+            cursor = conn.execute("""
+                SELECT
+                    COUNT(*) as total_users,
+                    SUM(CASE WHEN is_active = 1 THEN 1 ELSE 0 END) as active_users,
+                    SUM(CASE WHEN is_verified = 1 THEN 1 ELSE 0 END) as verified_users,
+                    SUM(CASE WHEN is_admin = 1 THEN 1 ELSE 0 END) as admin_users
+                FROM users
+            """)
+            user_stats = cursor.fetchone()
+
+            # Get repository statistics
+            cursor = conn.execute("""
+                SELECT
+                    COUNT(*) as total_repositories,
+                    COUNT(DISTINCT user_id) as users_with_repos,
+                    AVG(stars) as avg_stars,
+                    SUM(stars) as total_stars
+                FROM repositories
+            """)
+            repo_stats = cursor.fetchone()
+
+            # Get recent activity (last 30 days)
+            cursor = conn.execute("""
+                SELECT COUNT(*) as recent_users
+                FROM users
+                WHERE created_at >= datetime('now', '-30 days')
+            """)
+            recent_activity = cursor.fetchone()
+
+            return {
+                "users": {
+                    "total": user_stats[0] if user_stats else 0,
+                    "active": user_stats[1] if user_stats else 0,
+                    "verified": user_stats[2] if user_stats else 0,
+                    "admin": user_stats[3] if user_stats else 0,
+                    "recent": recent_activity[0] if recent_activity else 0
+                },
+                "repositories": {
+                    "total": repo_stats[0] if repo_stats else 0,
+                    "users_with_repos": repo_stats[1] if repo_stats else 0,
+                    "avg_stars": round(repo_stats[2] or 0, 1),
+                    "total_stars": repo_stats[3] if repo_stats else 0
+                },
+                "timestamp": datetime.utcnow().isoformat()
+            }
+
+    except Exception as e:
+        logger.error(f"Error getting admin stats: {e}")
+        raise internal_server_error("Failed to retrieve admin statistics")
+
+
+@router.patch("/admin/users/{user_id}", response_model=dict)
+async def update_user_admin(
+    user_id: int,
+    update_data: dict,
+    current_user: dict = Depends(require_admin)
+):
+    """
+    Update user information (admin only).
+
+    Allows admin to update user status, roles, and other properties.
+    """
+    try:
+        from nuggit.util.db import get_connection
+
+        # Validate update data
+        allowed_fields = ['is_active', 'is_admin', 'is_verified']
+        update_fields = {k: v for k, v in update_data.items() if k in allowed_fields}
+
+        if not update_fields:
+            raise validation_error("No valid fields to update")
+
+        # Check if user exists
+        user = get_user_by_id(user_id)
+        if not user:
+            raise not_found_error(f"User with ID {user_id} not found")
+
+        # Prevent admin from deactivating themselves
+        if user_id == current_user['id'] and 'is_active' in update_fields and not update_fields['is_active']:
+            raise validation_error("Cannot deactivate your own account")
+
+        # Update user in database
+        with get_connection() as conn:
+            set_clause = ", ".join([f"{field} = ?" for field in update_fields.keys()])
+            values = list(update_fields.values()) + [user_id]
+
+            conn.execute(f"""
+                UPDATE users
+                SET {set_clause}, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, values)
+            conn.commit()
+
+        logger.info(f"Admin {current_user['username']} updated user {user_id}: {update_fields}")
+
+        return {
+            "success": True,
+            "message": f"User {user_id} updated successfully",
+            "updated_fields": update_fields
+        }
+
+    except Exception as e:
+        logger.error(f"Error updating user {user_id}: {e}")
+        raise internal_server_error("Failed to update user")
