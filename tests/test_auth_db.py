@@ -60,6 +60,7 @@ def temp_db():
             token TEXT UNIQUE NOT NULL,
             expires_at TIMESTAMP NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            used_at TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
