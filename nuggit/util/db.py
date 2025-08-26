@@ -135,7 +135,9 @@ def _legacy_initialize_database() -> None:
             last_commit TEXT,
             tags TEXT,
             notes TEXT,
-            last_synced TEXT
+            last_synced TEXT,
+            version INTEGER DEFAULT 1,
+            user_id INTEGER
         )
         """)
         cursor.execute("""

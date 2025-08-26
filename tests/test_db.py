@@ -87,30 +87,28 @@ class TestDatabase(unittest.TestCase):
 
     def test_initialize_database(self):
         """Test that the database is initialized correctly."""
-        # Connect to the database directly to check the schema
-        conn = sqlite3.connect(self.temp_db_path)
-        cursor = conn.cursor()
+        # Use the same connection mechanism as other tests
+        with db.get_connection() as conn:
+            cursor = conn.cursor()
 
-        # Check if the repositories table exists
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='repositories'")
-        self.assertIsNotNone(cursor.fetchone())
+            # Check if the repositories table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='repositories'")
+            self.assertIsNotNone(cursor.fetchone())
 
-        # Check if the repository_history table exists
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='repository_history'")
-        self.assertIsNotNone(cursor.fetchone())
+            # Check if the repository_history table exists
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='repository_history'")
+            self.assertIsNotNone(cursor.fetchone())
 
-        # Check the schema of the repositories table
-        cursor.execute("PRAGMA table_info(repositories)")
-        columns = [row[1] for row in cursor.fetchall()]
-        expected_columns = [
-            'id', 'name', 'description', 'url', 'topics', 'license', 'created_at',
-            'updated_at', 'stars', 'forks', 'issues', 'contributors', 'commits',
-            'last_commit', 'tags', 'notes', 'last_synced'
-        ]
-        for column in expected_columns:
-            self.assertIn(column, columns)
-
-        conn.close()
+            # Check the schema of the repositories table
+            cursor.execute("PRAGMA table_info(repositories)")
+            columns = [row[1] for row in cursor.fetchall()]
+            expected_columns = [
+                'id', 'name', 'description', 'url', 'topics', 'license', 'created_at',
+                'updated_at', 'stars', 'forks', 'issues', 'contributors', 'commits',
+                'last_commit', 'tags', 'notes', 'last_synced', 'version', 'user_id'
+            ]
+            for column in expected_columns:
+                self.assertIn(column, columns)
 
     def test_insert_repo(self):
         """Test inserting a new repository."""
