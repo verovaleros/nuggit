@@ -289,9 +289,9 @@ def create_email_verification_token(user_id: int) -> str:
         
         # Insert new token
         cursor.execute("""
-            INSERT INTO email_verification_tokens (token, user_id, expires_at, created_at)
+            INSERT INTO email_verification_tokens (user_id, token, expires_at, created_at)
             VALUES (?, ?, ?, ?)
-        """, (token, user_id, expires_at.isoformat(), now))
+        """, (user_id, token, expires_at.isoformat(), now))
         
         logger.info(f"Created email verification token for user ID: {user_id}")
         return token
@@ -357,9 +357,9 @@ def create_password_reset_token(user_id: int) -> str:
         
         # Insert new token
         cursor.execute("""
-            INSERT INTO password_reset_tokens (token, user_id, expires_at, created_at)
+            INSERT INTO password_reset_tokens (user_id, token, expires_at, created_at)
             VALUES (?, ?, ?, ?)
-        """, (token, user_id, expires_at.isoformat(), now))
+        """, (user_id, token, expires_at.isoformat(), now))
         
         logger.info(f"Created password reset token for user ID: {user_id}")
         return token
