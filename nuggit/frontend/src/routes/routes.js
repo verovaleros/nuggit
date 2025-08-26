@@ -4,10 +4,13 @@ import Landing from './Landing.svelte';
 import Home from './Home.svelte';
 import Detail from './Detail.svelte';
 import Admin from './Admin.svelte';
+import Profile from './Profile.svelte';
+import Settings from './Settings.svelte';
 
 // Authentication components
 import Login from '../components/auth/Login.svelte';
 import Register from '../components/auth/Register.svelte';
+import VerifyEmail from '../components/auth/VerifyEmail.svelte';
 
 // Route guards
 import { requireAuth, requireAdmin, requireGuest } from '../lib/auth/authGuard.js';
@@ -15,17 +18,20 @@ import { requireAuth, requireAdmin, requireGuest } from '../lib/auth/authGuard.j
 export default {
   // Public routes
   '/': Landing,
-  '/home': requireAuth(Home),
+  '/home': Home,
 
-  // Authentication routes (guest only)
-  '/login': requireGuest(Login),
-  '/register': requireGuest(Register),
+  // Authentication routes
+  '/login': Login,
+  '/register': Register,
+  '/verify-email': VerifyEmail,
 
-  // Protected routes (authentication required)
-  '/repo/:id': requireAuth(Detail),
+  // Protected routes
+  '/repo/:id': Detail,
+  '/profile': Profile,
+  '/settings': Settings,
 
-  // Admin routes (admin privileges required)
-  '/admin': requireAdmin(Admin),
+  // Admin routes
+  '/admin': Admin,
 
   // Catch-all route for 404
   '*': Landing

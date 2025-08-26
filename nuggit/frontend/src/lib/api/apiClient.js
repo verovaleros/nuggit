@@ -47,6 +47,8 @@ class ApiClient {
     const url = `${this.baseURL}${endpoint}`;
     const config = await this.buildRequestConfig(options);
 
+
+
     try {
       const response = await this.fetchWithTimeout(url, config);
       return await this.handleResponse(response, endpoint, options);
@@ -178,9 +180,17 @@ class ApiClient {
    */
   async parseErrorResponse(response) {
     try {
-      return await response.json();
+      const errorData = await response.json();
+
+
+
+      return errorData;
     } catch {
-      return { message: `HTTP ${response.status}: ${response.statusText}` };
+      const fallbackMessage = `HTTP ${response.status}: ${response.statusText}`;
+
+
+
+      return { message: fallbackMessage };
     }
   }
 
@@ -222,6 +232,33 @@ class ApiClient {
     return this.request('/auth/register', {
       method: 'POST',
       body: JSON.stringify(userData)
+    });
+  }
+
+  /**
+   * Get current user profile
+   */
+  async getUserProfile() {
+    return this.request('/auth/me');
+  }
+
+  /**
+   * Update current user profile
+   */
+  async updateUserProfile(profileData) {
+    return this.request('/auth/me', {
+      method: 'PATCH',
+      body: JSON.stringify(profileData)
+    });
+  }
+
+  /**
+   * Change password
+   */
+  async changePassword(passwordData) {
+    return this.request('/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify(passwordData)
     });
   }
 
@@ -339,8 +376,40 @@ class ApiClient {
   /**
    * Get all users (admin only)
    */
-  async getUsers() {
-    return this.request('/auth/users');
+  async getUsers(page = 1, perPage = 20, search = null, isActive = null) {
+    const params = new URLSearchParams({
+      page: page.toString(),
+      per_page: perPage.toString()
+    });
+
+    if (search) params.append('search', search);
+    if (isActive !== null) params.append('is_active', isActive.toString());
+
+    return this.request(`/auth/admin/users?${params}`);
+  }
+
+  /**
+   * Get user details (admin only)
+   */
+  async getUserDetails(userId) {
+    return this.request(`/auth/admin/users/${userId}`);
+  }
+
+  /**
+   * Update user (admin only)
+   */
+  async updateUser(userId, updateData) {
+    return this.request(`/auth/admin/users/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updateData)
+    });
+  }
+
+  /**
+   * Get admin statistics
+   */
+  async getAdminStats() {
+    return this.request('/auth/admin/stats');
   }
 
   /**

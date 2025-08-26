@@ -6,7 +6,9 @@
  * admin permissions for admin-only routes.
  */
 
-import AuthWrapper from '../../components/AuthWrapper.svelte';
+import { get } from 'svelte/store';
+import { push } from 'svelte-spa-router';
+import { authStore } from '../stores/authStore.js';
 
 /**
  * Route guard that requires authentication
@@ -14,13 +16,22 @@ import AuthWrapper from '../../components/AuthWrapper.svelte';
  */
 export function requireAuth(component) {
   return (detail) => {
-    return {
-      component: AuthWrapper,
-      props: {
-        component: component,
-        requireAuth: true
-      }
-    };
+    const authState = get(authStore);
+
+    // If auth is not initialized, allow component to render and handle auth internally
+    if (!authState.isInitialized) {
+      return component;
+    }
+
+    // Auth is initialized, check authentication
+    if (!authState.isAuthenticated) {
+      // Store the intended route for redirect after login
+      sessionStorage.setItem('nuggit_redirect_after_login', window.location.hash);
+      push('/login');
+      return component; // Return component instead of null to avoid Svelte errors
+    }
+
+    return component;
   };
 }
 
@@ -30,13 +41,27 @@ export function requireAuth(component) {
  */
 export function requireAdmin(component) {
   return (detail) => {
-    return {
-      component: AuthWrapper,
-      props: {
-        component: component,
-        requireAdmin: true
-      }
-    };
+    const authState = get(authStore);
+
+    // If auth is not initialized, allow component to render and handle auth internally
+    if (!authState.isInitialized) {
+      return component;
+    }
+
+    // Auth is initialized, check authentication and admin status
+    if (!authState.isAuthenticated) {
+      sessionStorage.setItem('nuggit_redirect_after_login', window.location.hash);
+      push('/login');
+      return component;
+    }
+
+    if (!authState.user?.is_admin) {
+      // User is authenticated but not admin, redirect to home
+      push('/home');
+      return component;
+    }
+
+    return component;
   };
 }
 
@@ -46,14 +71,27 @@ export function requireAdmin(component) {
  */
 export function requireVerified(component) {
   return (detail) => {
-    return {
-      component: AuthWrapper,
-      props: {
-        component: component,
-        requireAuth: true,
-        requireVerified: true
-      }
-    };
+    const authState = get(authStore);
+
+    // If auth is not initialized, allow component to render and handle auth internally
+    if (!authState.isInitialized) {
+      return component;
+    }
+
+    // Auth is initialized, check authentication and verification
+    if (!authState.isAuthenticated) {
+      sessionStorage.setItem('nuggit_redirect_after_login', window.location.hash);
+      push('/login');
+      return component;
+    }
+
+    if (!authState.user?.is_verified) {
+      // User is authenticated but not verified
+      push('/verify-email');
+      return component;
+    }
+
+    return component;
   };
 }
 
@@ -63,58 +101,22 @@ export function requireVerified(component) {
  */
 export function requireGuest(component) {
   return (detail) => {
-    return {
-      component: AuthWrapper,
-      props: {
-        component: component,
-        requireGuest: true
-      }
-    };
+    const authState = get(authStore);
+
+    // If auth is not initialized, allow component to render and handle auth internally
+    if (!authState.isInitialized) {
+      return component;
+    }
+
+    // Auth is initialized, check authentication
+    if (authState.isAuthenticated) {
+      // User is authenticated, redirect to home
+      push('/home');
+      return component;
+    }
+
+    return component;
   };
-}
-
-/**
- * Composite guard that requires both authentication and admin privileges
- */
-export function requireAuthAndAdmin(component) {
-  return requireAuth(requireAdmin(component));
-}
-
-/**
- * Composite guard that requires authentication and email verification
- */
-export function requireAuthAndVerified(component) {
-  return requireAuth(requireVerified(component));
-}
-
-/**
- * Utility function to check if user has permission for a specific action
- */
-export function hasPermission(permission) {
-  const authState = get(authStore);
-  
-  if (!authState.isAuthenticated || !authState.user) {
-    return false;
-  }
-  
-  const user = authState.user;
-  
-  switch (permission) {
-    case 'admin':
-      return user.is_admin;
-    case 'verified':
-      return user.is_verified;
-    case 'active':
-      return user.is_active;
-    case 'manage_users':
-      return user.is_admin;
-    case 'manage_repositories':
-      return user.is_admin;
-    case 'view_admin_panel':
-      return user.is_admin;
-    default:
-      return false;
-  }
 }
 
 /**
@@ -139,55 +141,3 @@ export function handlePostLoginRedirect() {
     push('/');
   }
 }
-
-/**
- * Higher-order function to create custom route guards
- */
-export function createRouteGuard(checkFunction, redirectPath = '/login') {
-  return function(component) {
-    return function(detail) {
-      const authState = get(authStore);
-      
-      if (!authState.isInitialized) {
-        return new Promise((resolve) => {
-          const unsubscribe = authStore.subscribe((state) => {
-            if (state.isInitialized) {
-              unsubscribe();
-              if (checkFunction(state)) {
-                resolve(component);
-              } else {
-                if (redirectPath === '/login') {
-                  sessionStorage.setItem('nuggit_redirect_after_login', window.location.hash);
-                }
-                push(redirectPath);
-                resolve(null);
-              }
-            }
-          });
-        });
-      }
-      
-      if (checkFunction(authState)) {
-        return component;
-      } else {
-        if (redirectPath === '/login') {
-          sessionStorage.setItem('nuggit_redirect_after_login', window.location.hash);
-        }
-        push(redirectPath);
-        return null;
-      }
-    };
-  };
-}
-
-/**
- * Export commonly used guard combinations
- */
-export const guards = {
-  auth: requireAuth,
-  admin: requireAdmin,
-  verified: requireVerified,
-  guest: requireGuest,
-  authAndAdmin: requireAuthAndAdmin,
-  authAndVerified: requireAuthAndVerified
-};

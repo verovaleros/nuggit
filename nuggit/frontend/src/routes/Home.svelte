@@ -18,6 +18,14 @@
   $: isAuthenticated = authState.isAuthenticated;
   $: currentUser = authState.user;
 
+  // Redirect to login if not authenticated
+  $: if (authState.isInitialized && !isAuthenticated) {
+    import('svelte-spa-router').then(({ push }) => {
+      sessionStorage.setItem('nuggit_redirect_after_login', window.location.hash);
+      push('/login');
+    });
+  }
+
   let currentTab = 'repos';
 
   function parseHashTab() {

@@ -17,6 +17,14 @@
   $: isAuthenticated = authState.isAuthenticated;
   $: currentUser = authState.user;
 
+  // Redirect to login if not authenticated
+  $: if (authState.isInitialized && !isAuthenticated) {
+    import('svelte-spa-router').then(({ push }) => {
+      sessionStorage.setItem('nuggit_redirect_after_login', window.location.hash);
+      push('/login');
+    });
+  }
+
   let repoId = null;
   let repo = null;
 
@@ -308,42 +316,14 @@
         return false;
       }
 
-      // Properly encode the repository ID for the URL
+      console.log('Checking if repository exists:', repoId);
+
+      // Use API client for authenticated requests
       const encodedRepoId = encodeURIComponent(repoId);
-      const checkUrl = `http://localhost:8001/repositories/check/${encodedRepoId}`;
-      console.log('Checking if repository exists:', checkUrl);
-      console.log('Repository ID being checked:', repoId);
+      const data = await apiClient.request(`/repositories/check/${encodedRepoId}`);
 
-      // Set a timeout for the fetch operation
-      const controller = createAbortController();
-      const timeoutId = createTimeout(() => controller.abort(), 5000); // 5 second timeout
-
-      try {
-        const res = await fetch(checkUrl, {
-          signal: controller.signal,
-          headers: {
-            'Accept': 'application/json'
-          }
-        });
-
-        clearTimeout(timeoutId); // Clear the timeout if fetch completes
-        activeTimeouts.delete(timeoutId);
-        clearAbortController(controller);
-
-        if (!res.ok) {
-          console.error('Error checking repository:', await res.text());
-          return false;
-        }
-
-        const data = await res.json();
-        console.log('Repository check response:', data);
-        return data.exists;
-      } catch (fetchErr) {
-        if (fetchErr.name === 'AbortError') {
-          console.warn('Repository check timed out');
-        }
-        throw fetchErr;
-      }
+      console.log('Repository check response:', data);
+      return data.exists;
     } catch (err) {
       console.error('Error checking if repository exists:', err);
       return false;
@@ -385,49 +365,45 @@
       const timeoutId = createTimeout(() => controller.abort(), 10000); // 10 second timeout (increased from 5)
 
       try {
-        // Log the URL we're fetching from - make sure to include trailing slash
-        const url = `http://localhost:8001/repositories/${encodedRepoId}/commits/`;
-        console.log('Fetching commits from URL:', url);
+        // Check authentication before making API calls
+        const token = authStore.getToken();
+        const user = authStore.getUser();
 
-        const res = await fetch(url, {
-          signal: controller.signal,
-          headers: {
-            'Accept': 'application/json'
-          }
-        });
+        if (!token) {
+          throw new Error('Please log in to view repository commits');
+        }
+
+        console.log('Fetching commits for repository:', repoId);
+
+        const commits = await apiClient.getRepositoryCommits(repoId, 10);
 
         clearTimeout(timeoutId); // Clear the timeout if fetch completes
         activeTimeouts.delete(timeoutId);
         clearAbortController(controller);
 
-        if (!res.ok) {
-          const errorText = await res.text();
-          console.error('Error response from commits API:', errorText);
-          throw new Error(errorText || `HTTP error ${res.status}`);
+        // Validate that we received an array
+        if (!Array.isArray(commits)) {
+          console.error('Invalid commits response format:', commits);
+          throw new Error('Invalid response format from server');
         }
 
-        // Try to parse the JSON response
-        try {
-          const commits = await res.json();
+        repo.recent_commits = commits;
+        console.log('Commits fetched successfully:', commits);
+      } catch (apiErr) {
+        clearTimeout(timeoutId);
+        activeTimeouts.delete(timeoutId);
+        clearAbortController(controller);
 
-          // Validate that we received an array
-          if (!Array.isArray(commits)) {
-            console.error('Invalid commits response format:', commits);
-            throw new Error('Invalid response format from server');
-          }
-
-          repo.recent_commits = commits;
-          console.log('Commits fetched successfully:', commits);
-        } catch (jsonErr) {
-          console.error('Error parsing commits JSON:', jsonErr);
-          throw new Error('Invalid JSON response from server');
-        }
-      } catch (fetchErr) {
-        if (fetchErr.name === 'AbortError') {
+        if (apiErr.name === 'AbortError') {
           commitsError = 'Failed to load commits: Connection timed out';
           console.warn('Commits fetch timed out');
+          return; // Don't throw, just set error and return
+        } else if (apiErr.message && apiErr.message.includes('Repository not found')) {
+          throw new Error('Repository not found in database');
+        } else if (apiErr.message && apiErr.message.includes('access')) {
+          throw new Error('You don\'t have access to this repository');
         } else {
-          throw fetchErr;
+          throw apiErr;
         }
       }
     } catch (err) {

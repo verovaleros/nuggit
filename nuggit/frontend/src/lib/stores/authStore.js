@@ -210,7 +210,10 @@ function createAuthStore() {
      */
     logout() {
       this.clearStorage();
-      set(initialState);
+      set({
+        ...initialState,
+        isInitialized: true  // Keep initialized state to prevent re-initialization
+      });
       push('/');
     },
 
@@ -317,6 +320,23 @@ function createAuthStore() {
     getToken() {
       const state = this.getCurrentState();
       return state.token;
+    },
+
+    /**
+     * Update user profile data
+     */
+    updateUser(updatedUserData) {
+      update(state => {
+        const newUser = { ...state.user, ...updatedUserData };
+
+        // Update localStorage
+        localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(newUser));
+
+        return {
+          ...state,
+          user: newUser
+        };
+      });
     }
   };
 }

@@ -16,6 +16,20 @@
   $: currentUser = authState.user;
   $: isAdmin = currentUser?.is_admin || false;
 
+  // Redirect if not authenticated or not admin
+  $: if (authState.isInitialized) {
+    if (!authState.isAuthenticated) {
+      import('svelte-spa-router').then(({ push }) => {
+        sessionStorage.setItem('nuggit_redirect_after_login', window.location.hash);
+        push('/login');
+      });
+    } else if (!isAdmin) {
+      import('svelte-spa-router').then(({ push }) => {
+        push('/home');
+      });
+    }
+  }
+
   // Component state
   let loading = true;
   let error = null;
@@ -75,20 +89,39 @@
   }
 
   async function loadStats() {
-    // Placeholder for admin stats endpoint
-    return {
-      totalUsers: users.length || 0,
-      totalRepositories: repositories.length || 0,
-      activeUsers: users.filter(u => u.is_active).length || 0,
-      verifiedUsers: users.filter(u => u.is_verified).length || 0
-    };
+    try {
+      const response = await apiClient.getAdminStats();
+      return {
+        totalUsers: response.users.total,
+        totalRepositories: response.repositories.total,
+        activeUsers: response.users.active,
+        verifiedUsers: response.users.verified,
+        adminUsers: response.users.admin,
+        recentUsers: response.users.recent,
+        usersWithRepos: response.repositories.users_with_repos,
+        avgStars: response.repositories.avg_stars,
+        totalStars: response.repositories.total_stars
+      };
+    } catch (error) {
+      console.error('Error loading admin stats:', error);
+      return {
+        totalUsers: 0,
+        totalRepositories: 0,
+        activeUsers: 0,
+        verifiedUsers: 0,
+        adminUsers: 0,
+        recentUsers: 0,
+        usersWithRepos: 0,
+        avgStars: 0,
+        totalStars: 0
+      };
+    }
   }
 
   async function loadUsers() {
     try {
-      // This would be an admin-only endpoint to list all users
-      // For now, return empty array as endpoint doesn't exist yet
-      return [];
+      const response = await apiClient.getUsers(1, 50); // Load first 50 users
+      return response.users || [];
     } catch (error) {
       console.error('Error loading users:', error);
       return [];
@@ -122,13 +155,29 @@
 
   async function toggleUserStatus(userId, field) {
     try {
-      // Placeholder for user management endpoint
-      console.log(`Toggle ${field} for user ${userId}`);
-      // await apiClient.updateUser(userId, { [field]: !user[field] });
-      // await loadUsers();
+      const user = users.find(u => u.id === userId);
+      if (!user) return;
+
+      const updateData = { [field]: !user[field] };
+      await apiClient.updateUser(userId, updateData);
+
+      // Update local state
+      user[field] = !user[field];
+      users = [...users]; // Trigger reactivity
+
+      // Reload stats to reflect changes
+      stats = await loadStats();
+
+      console.log(`Successfully toggled ${field} for user ${userId}`);
     } catch (error) {
       console.error(`Error toggling user ${field}:`, error);
+      // Optionally show user-friendly error message
+      alert(`Failed to update user ${field}. Please try again.`);
     }
+  }
+
+  async function refreshData() {
+    await loadAdminData();
   }
 </script>
 
@@ -194,38 +243,93 @@
       {#if activeTab === 'overview'}
         <!-- Overview Tab -->
         <div class="overview-section">
-          <h2>System Overview</h2>
-          
-          <div class="stats-grid">
-            <div class="stat-card">
-              <div class="stat-icon">👥</div>
-              <div class="stat-content">
-                <div class="stat-number">{stats.totalUsers}</div>
-                <div class="stat-label">Total Users</div>
+          <div class="section-header">
+            <h2>System Overview</h2>
+            <button class="btn btn-secondary" on:click={refreshData}>
+              🔄 Refresh
+            </button>
+          </div>
+
+          <!-- User Statistics -->
+          <div class="stats-section">
+            <h3>User Statistics</h3>
+            <div class="stats-grid">
+              <div class="stat-card">
+                <div class="stat-icon">👥</div>
+                <div class="stat-content">
+                  <div class="stat-number">{stats.totalUsers}</div>
+                  <div class="stat-label">Total Users</div>
+                </div>
+              </div>
+
+              <div class="stat-card">
+                <div class="stat-icon">✅</div>
+                <div class="stat-content">
+                  <div class="stat-number">{stats.activeUsers}</div>
+                  <div class="stat-label">Active Users</div>
+                </div>
+              </div>
+
+              <div class="stat-card">
+                <div class="stat-icon">🔐</div>
+                <div class="stat-content">
+                  <div class="stat-number">{stats.verifiedUsers}</div>
+                  <div class="stat-label">Verified Users</div>
+                </div>
+              </div>
+
+              <div class="stat-card">
+                <div class="stat-icon">👑</div>
+                <div class="stat-content">
+                  <div class="stat-number">{stats.adminUsers || 0}</div>
+                  <div class="stat-label">Admin Users</div>
+                </div>
+              </div>
+
+              <div class="stat-card">
+                <div class="stat-icon">🆕</div>
+                <div class="stat-content">
+                  <div class="stat-number">{stats.recentUsers || 0}</div>
+                  <div class="stat-label">New Users (30d)</div>
+                </div>
               </div>
             </div>
-            
-            <div class="stat-card">
-              <div class="stat-icon">📚</div>
-              <div class="stat-content">
-                <div class="stat-number">{stats.totalRepositories}</div>
-                <div class="stat-label">Repositories</div>
+          </div>
+
+          <!-- Repository Statistics -->
+          <div class="stats-section">
+            <h3>Repository Statistics</h3>
+            <div class="stats-grid">
+              <div class="stat-card">
+                <div class="stat-icon">📚</div>
+                <div class="stat-content">
+                  <div class="stat-number">{stats.totalRepositories}</div>
+                  <div class="stat-label">Total Repositories</div>
+                </div>
               </div>
-            </div>
-            
-            <div class="stat-card">
-              <div class="stat-icon">✅</div>
-              <div class="stat-content">
-                <div class="stat-number">{stats.activeUsers}</div>
-                <div class="stat-label">Active Users</div>
+
+              <div class="stat-card">
+                <div class="stat-icon">👤</div>
+                <div class="stat-content">
+                  <div class="stat-number">{stats.usersWithRepos || 0}</div>
+                  <div class="stat-label">Users with Repos</div>
+                </div>
               </div>
-            </div>
-            
-            <div class="stat-card">
-              <div class="stat-icon">🔐</div>
-              <div class="stat-content">
-                <div class="stat-number">{stats.verifiedUsers}</div>
-                <div class="stat-label">Verified Users</div>
+
+              <div class="stat-card">
+                <div class="stat-icon">⭐</div>
+                <div class="stat-content">
+                  <div class="stat-number">{stats.totalStars || 0}</div>
+                  <div class="stat-label">Total Stars</div>
+                </div>
+              </div>
+
+              <div class="stat-card">
+                <div class="stat-icon">📊</div>
+                <div class="stat-content">
+                  <div class="stat-number">{stats.avgStars || 0}</div>
+                  <div class="stat-label">Avg Stars/Repo</div>
+                </div>
               </div>
             </div>
           </div>
@@ -236,19 +340,100 @@
         <div class="users-section">
           <div class="section-header">
             <h2>User Management</h2>
-            <button class="btn btn-primary" on:click={() => openUserModal()}>
-              ➕ Add User
-            </button>
+            <div class="user-stats-summary">
+              <span class="summary-item">Total: {users.length}</span>
+              <span class="summary-item">Active: {users.filter(u => u.is_active).length}</span>
+              <span class="summary-item">Verified: {users.filter(u => u.is_verified).length}</span>
+            </div>
           </div>
-          
+
           {#if users.length === 0}
             <div class="empty-state">
-              <p>No users found. User management endpoints need to be implemented.</p>
+              <p>No users found.</p>
             </div>
           {:else}
-            <div class="users-table">
-              <!-- User table would go here -->
-              <p>User management table will be implemented when backend endpoints are ready.</p>
+            <div class="users-table-container">
+              <table class="users-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Status</th>
+                    <th>Verified</th>
+                    <th>Admin</th>
+                    <th>Repositories</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {#each users as user}
+                    <tr class:inactive={!user.is_active}>
+                      <td>{user.id}</td>
+                      <td class="username-cell">
+                        <span class="username">{user.username}</span>
+                        {#if user.is_admin}
+                          <span class="admin-badge">👑</span>
+                        {/if}
+                      </td>
+                      <td class="email-cell">{user.email}</td>
+                      <td>
+                        <span class="status-badge" class:active={user.is_active} class:inactive={!user.is_active}>
+                          {user.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td>
+                        <span class="verification-badge" class:verified={user.is_verified} class:unverified={!user.is_verified}>
+                          {user.is_verified ? '✅' : '❌'}
+                        </span>
+                      </td>
+                      <td>
+                        <span class="admin-status">
+                          {user.is_admin ? '👑 Yes' : 'No'}
+                        </span>
+                      </td>
+                      <td class="repo-count">
+                        {repositories.filter(r => r.user_id === user.id).length}
+                      </td>
+                      <td class="date-cell">
+                        {user.created_at ? new Date(user.created_at).toLocaleDateString() : 'N/A'}
+                      </td>
+                      <td class="actions-cell">
+                        <div class="action-buttons">
+                          <button
+                            class="btn btn-sm"
+                            class:btn-success={!user.is_active}
+                            class:btn-warning={user.is_active}
+                            on:click={() => toggleUserStatus(user.id, 'is_active')}
+                            title={user.is_active ? 'Deactivate user' : 'Activate user'}
+                          >
+                            {user.is_active ? '⏸️' : '▶️'}
+                          </button>
+
+                          <button
+                            class="btn btn-sm btn-info"
+                            on:click={() => toggleUserStatus(user.id, 'is_verified')}
+                            title={user.is_verified ? 'Unverify user' : 'Verify user'}
+                          >
+                            {user.is_verified ? '🔓' : '🔒'}
+                          </button>
+
+                          <button
+                            class="btn btn-sm"
+                            class:btn-danger={user.is_admin}
+                            class:btn-secondary={!user.is_admin}
+                            on:click={() => toggleUserStatus(user.id, 'is_admin')}
+                            title={user.is_admin ? 'Remove admin' : 'Make admin'}
+                          >
+                            {user.is_admin ? '👑➖' : '👑➕'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  {/each}
+                </tbody>
+              </table>
             </div>
           {/if}
         </div>
@@ -273,7 +458,7 @@
                   <p class="repo-id">{repo.id}</p>
                   <p class="repo-description">{repo.description || 'No description'}</p>
                   <div class="repo-meta">
-                    <span class="repo-owner">Owner ID: {repo.owner_id}</span>
+                    <span class="repo-owner">Owner ID: {repo.user_id}</span>
                     <span class="repo-stars">⭐ {repo.stars || 0}</span>
                   </div>
                 </div>
@@ -399,6 +584,28 @@
   .nav-button.active {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
+  }
+
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+  }
+
+  .section-header h2 {
+    margin: 0;
+    color: #333;
+  }
+
+  .stats-section {
+    margin-bottom: 3rem;
+  }
+
+  .stats-section h3 {
+    margin: 0 0 1rem 0;
+    color: #555;
+    font-size: 1.2rem;
   }
 
   .stats-grid {
@@ -532,6 +739,137 @@
   .btn-primary:hover {
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  }
+
+  /* User Management Styles */
+  .user-stats-summary {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.9rem;
+    color: #666;
+  }
+
+  .summary-item {
+    padding: 0.25rem 0.5rem;
+    background: #f8f9fa;
+    border-radius: 4px;
+  }
+
+  .users-table-container {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    overflow: hidden;
+  }
+
+  .users-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .users-table th,
+  .users-table td {
+    padding: 1rem;
+    text-align: left;
+    border-bottom: 1px solid #e1e5e9;
+  }
+
+  .users-table th {
+    background: #f8f9fa;
+    font-weight: 600;
+    color: #333;
+    font-size: 0.9rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .users-table tr:hover {
+    background: #f8f9fa;
+  }
+
+  .users-table tr.inactive {
+    opacity: 0.6;
+  }
+
+  .username-cell {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .admin-badge {
+    font-size: 0.8rem;
+  }
+
+  .email-cell {
+    font-family: monospace;
+    font-size: 0.9rem;
+  }
+
+  .status-badge {
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 500;
+  }
+
+  .status-badge.active {
+    background: #d4edda;
+    color: #155724;
+  }
+
+  .status-badge.inactive {
+    background: #f8d7da;
+    color: #721c24;
+  }
+
+  .verification-badge {
+    font-size: 1.2rem;
+  }
+
+  .date-cell {
+    font-size: 0.9rem;
+    color: #666;
+  }
+
+  .actions-cell {
+    white-space: nowrap;
+  }
+
+  .action-buttons {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8rem;
+    border-radius: 4px;
+  }
+
+  .btn-success {
+    background: #28a745;
+    color: white;
+  }
+
+  .btn-warning {
+    background: #ffc107;
+    color: #212529;
+  }
+
+  .btn-info {
+    background: #17a2b8;
+    color: white;
+  }
+
+  .btn-danger {
+    background: #dc3545;
+    color: white;
+  }
+
+  .btn-secondary {
+    background: #6c757d;
+    color: white;
   }
 
   /* Responsive design */
