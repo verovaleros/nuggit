@@ -315,10 +315,20 @@ def verify_password_reset_token(token: str, max_age_hours: int = 1) -> Optional[
         if token_age > max_age_hours * 3600:
             return None
         
+        # Get user email from database to verify token hash
+        try:
+            from nuggit.util.user_db import get_user_by_id
+            user = get_user_by_id(user_id)
+            if not user:
+                return None
+            email = user['email']
+        except Exception:
+            return None
+
         # Verify token hash
-        data = f"{user_id}:reset:{timestamp}:{JWT_SECRET_KEY}"
+        data = f"{user_id}:{email}:{timestamp}:{JWT_SECRET_KEY}"
         expected_hash = hashlib.sha256(data.encode()).hexdigest()
-        
+
         if secrets.compare_digest(token_hash, expected_hash):
             return user_id
         
