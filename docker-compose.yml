@@ -9,6 +9,9 @@ services:
     volumes:
       - ./nuggit/.env:/app/nuggit/.env:ro  # Mount .env file
       - ./nuggit/nuggit.db:/app/nuggit/nuggit.db  # Mount database file from correct source location
+      - ./nuggit:/app/nuggit  # Mount source code for development
+      - ./nuggit/frontend:/app/frontend  # Mount frontend source code
+      - /app/frontend/node_modules  # Exclude node_modules from volume mount
     restart: unless-stopped
     env_file:
-      - ./nuggit/.env  # Use the .env file directly
+      - ./nuggit/.env  # All environment variables are read from .env file
