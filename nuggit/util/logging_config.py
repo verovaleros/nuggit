@@ -10,6 +10,7 @@ import sys
 import json
 import logging
 import logging.handlers
+import uuid
 from pathlib import Path
 from typing import Dict, Any, Optional, Union
 from datetime import datetime
@@ -375,7 +376,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             "query_string": str(request.url.query) if request.url.query else "",
             "client": request.client.host if request.client else "unknown",
             "user_agent": request.headers.get("user-agent", "unknown"),
-            "request_id": f"req_{datetime.now().timestamp()}_{os.getpid()}"
+            "request_id": f"req_{uuid.uuid4()}"
         }
 
         start_time = datetime.now().timestamp()
