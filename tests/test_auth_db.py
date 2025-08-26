@@ -100,6 +100,45 @@ def temp_db():
             FOREIGN KEY (user_id) REFERENCES users (id)
         )
     ''')
+
+    # Create repository_history table
+    conn.execute('''
+        CREATE TABLE repository_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            repo_id TEXT NOT NULL,
+            field TEXT NOT NULL,
+            old_value TEXT,
+            new_value TEXT,
+            changed_at TEXT NOT NULL,
+            FOREIGN KEY (repo_id) REFERENCES repositories(id)
+        )
+    ''')
+
+    # Create repository_comments table
+    conn.execute('''
+        CREATE TABLE repository_comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            repo_id TEXT NOT NULL,
+            comment TEXT NOT NULL,
+            author TEXT DEFAULT 'Anonymous',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (repo_id) REFERENCES repositories(id)
+        )
+    ''')
+
+    # Create repository_versions table
+    conn.execute('''
+        CREATE TABLE repository_versions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            repo_id TEXT NOT NULL,
+            version_number TEXT NOT NULL,
+            release_date TEXT,
+            description TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (repo_id) REFERENCES repositories(id),
+            UNIQUE(repo_id, version_number)
+        )
+    ''')
     
     conn.commit()
     conn.close()
@@ -121,9 +160,10 @@ def temp_db():
         finally:
             conn.close()
 
-    # Patch the get_connection function in user_db module
+    # Patch the get_connection function in both user_db and db modules
     from unittest.mock import patch
-    with patch('nuggit.util.user_db.get_connection', test_get_connection):
+    with patch('nuggit.util.user_db.get_connection', test_get_connection), \
+         patch('nuggit.util.db.get_connection', test_get_connection):
         yield db_path
 
     # Cleanup
