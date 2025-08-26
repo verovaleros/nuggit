@@ -189,11 +189,6 @@ def temp_db():
     conn.commit()
     conn.close()
 
-    # Patch the DB_PATH in the db module
-    from nuggit.util import db
-    original_db_path = db.DB_PATH
-    db.DB_PATH = db_path
-
     # Create a context manager for our test database
     from contextlib import contextmanager
 
@@ -216,7 +211,6 @@ def temp_db():
         yield db_path
 
     # Cleanup
-    db.DB_PATH = original_db_path
     os.unlink(db_path)
 
 
