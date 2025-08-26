@@ -18,6 +18,10 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
+# SQLite configuration constants
+SQLITE_CACHE_SIZE = -64000  # 64MB cache (negative value means KB)
+SQLITE_MMAP_SIZE = 268435456  # 256MB memory-mapped I/O (256 * 1024 * 1024)
+
 
 @dataclass
 class ConnectionInfo:
@@ -78,9 +82,9 @@ class ConnectionPool:
         conn.execute("PRAGMA foreign_keys = ON")
         conn.execute("PRAGMA journal_mode = WAL")  # Better concurrency
         conn.execute("PRAGMA synchronous = NORMAL")  # Good balance of safety and performance
-        conn.execute("PRAGMA cache_size = -64000")  # 64MB cache
+        conn.execute(f"PRAGMA cache_size = {SQLITE_CACHE_SIZE}")  # 64MB cache
         conn.execute("PRAGMA temp_store = MEMORY")  # Store temp tables in memory
-        conn.execute("PRAGMA mmap_size = 268435456")  # 256MB memory-mapped I/O
+        conn.execute(f"PRAGMA mmap_size = {SQLITE_MMAP_SIZE}")  # 256MB memory-mapped I/O
         
         self._stats['connections_created'] += 1
         logger.debug(f"Created new database connection (total: {self._total_connections + 1})")
