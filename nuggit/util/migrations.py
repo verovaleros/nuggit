@@ -172,21 +172,42 @@ class MigrationManager:
             return [dict(row) for row in cursor.fetchall()]
     
     def get_pending_migrations(self) -> List[Migration]:
-        """Get list of migrations that haven't been applied yet."""
+        """Get list of migrations that haven't been applied yet, in dependency order."""
         applied_versions = {m['version'] for m in self.get_applied_migrations()}
+        all_pending_versions = {v for v in self.migrations.keys() if v not in applied_versions}
+
+        # If no pending migrations, return empty list
+        if not all_pending_versions:
+            return []
+
+        # Build dependency graph and resolve order
         pending = []
-        
-        for version in sorted(self.migrations.keys()):
-            if version not in applied_versions:
-                migration = self.migrations[version]
-                # Check if dependencies are satisfied
-                for dep in migration.dependencies:
-                    if dep not in applied_versions:
-                        raise MigrationError(
-                            f"Migration {version} depends on {dep} which is not applied"
-                        )
+        processed = set()
+
+        def add_migration_with_deps(version: str):
+            """Recursively add migration and its dependencies."""
+            if version in processed or version in applied_versions:
+                return
+
+            if version not in self.migrations:
+                raise MigrationError(f"Migration {version} not found")
+
+            migration = self.migrations[version]
+
+            # First, add all dependencies
+            for dep in migration.dependencies:
+                if dep not in applied_versions:
+                    add_migration_with_deps(dep)
+
+            # Then add this migration if it's pending
+            if version in all_pending_versions and version not in processed:
                 pending.append(migration)
-        
+                processed.add(version)
+
+        # Process all pending migrations
+        for version in sorted(all_pending_versions):
+            add_migration_with_deps(version)
+
         return pending
     
     def apply_migration(self, migration: Migration) -> float:
