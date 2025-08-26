@@ -219,12 +219,12 @@ def insert_or_update_repo(repo_data: Dict[str, Any], user_id: Optional[int] = No
 
     if PERFORMANCE_LOGGING_AVAILABLE:
         with LogTimer(operation_name, repo_id=repo_data.get('id')):
-            _insert_or_update_repo_impl(repo_data)
+            _insert_or_update_repo_impl(repo_data, user_id)
     else:
-        _insert_or_update_repo_impl(repo_data)
+        _insert_or_update_repo_impl(repo_data, user_id)
 
 
-def _insert_or_update_repo_impl(repo_data: Dict[str, Any]) -> None:
+def _insert_or_update_repo_impl(repo_data: Dict[str, Any], user_id: Optional[int] = None) -> None:
     """Implementation of insert_or_update_repo with performance logging."""
     from nuggit.util.validation import validate_repository_data, ValidationError
 
@@ -422,7 +422,7 @@ def list_user_repositories(user_id: int) -> List[Dict[str, Any]]:
     Raises:
         sqlite3.Error: If the database query fails.
     """
-    query = "SELECT * FROM repositories WHERE owner_id = ?"
+    query = "SELECT * FROM repositories WHERE user_id = ?"
     with get_connection() as conn:
         return [dict(r) for r in conn.execute(query, (user_id,))]
 
