@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from urllib.parse import urlparse
 import logging
 
-from nuggit.util.timezone import validate_datetime_string, parse_datetime
+from nuggit.util.timezone import validate_datetime_string, parse_datetime, to_utc_iso
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,6 @@ class RepositoryModel(BaseModel):
         if dt is None:
             raise ValueError('Could not parse timestamp')
 
-        from nuggit.util.timezone import to_utc_iso
         return to_utc_iso(dt)
 
     @field_validator('topics', 'tags')
@@ -177,7 +176,6 @@ class RepositoryHistoryModel(BaseModel):
         if dt is None:
             raise ValueError('Could not parse timestamp')
 
-        from nuggit.util.timezone import to_utc_iso
         return to_utc_iso(dt)
 
     @field_validator('field')
@@ -240,7 +238,6 @@ class RepositoryCommentModel(BaseModel):
         if dt is None:
             raise ValueError('Could not parse timestamp')
 
-        from nuggit.util.timezone import to_utc_iso
         return to_utc_iso(dt)
 
 
@@ -294,7 +291,6 @@ class RepositoryVersionModel(BaseModel):
         if dt is None:
             raise ValueError('Could not parse release date')
 
-        from nuggit.util.timezone import to_utc_iso
         return to_utc_iso(dt)
 
     @field_validator('created_at')
@@ -309,7 +305,6 @@ class RepositoryVersionModel(BaseModel):
         if dt is None:
             raise ValueError('Could not parse timestamp')
 
-        from nuggit.util.timezone import to_utc_iso
         return to_utc_iso(dt)
 
 
