@@ -118,10 +118,10 @@ class GitHubAPIClient:
                     # If we can't determine the structure, create default values
                     logger.debug("Unable to determine rate limit structure, using defaults")
                     self._rate_limit_cache[RateLimitType.CORE] = RateLimitInfo(
-                        limit=5000, remaining=5000, reset_time=int(now.timestamp()) + DEFAULT_RATE_LIMIT_RESET_TIME, used=0
+                        limit=5000, remaining=5000, reset_time=now + timedelta(seconds=DEFAULT_RATE_LIMIT_RESET_TIME), used=0
                     )
                     self._rate_limit_cache[RateLimitType.SEARCH] = RateLimitInfo(
-                        limit=30, remaining=30, reset_time=int(now.timestamp()) + DEFAULT_RATE_LIMIT_RESET_TIME, used=0
+                        limit=30, remaining=30, reset_time=now + timedelta(seconds=DEFAULT_RATE_LIMIT_RESET_TIME), used=0
                     )
                     self._last_rate_limit_check = now
                     return
@@ -130,7 +130,7 @@ class GitHubAPIClient:
             self._rate_limit_cache[RateLimitType.CORE] = RateLimitInfo(
                 limit=core.limit,
                 remaining=core.remaining,
-                reset_time=core.reset,
+                reset_time=datetime.fromtimestamp(core.reset),
                 used=core.limit - core.remaining
             )
 
@@ -139,13 +139,13 @@ class GitHubAPIClient:
                 self._rate_limit_cache[RateLimitType.SEARCH] = RateLimitInfo(
                     limit=search.limit,
                     remaining=search.remaining,
-                    reset_time=search.reset,
+                    reset_time=datetime.fromtimestamp(search.reset),
                     used=search.limit - search.remaining
                 )
             else:
                 # Use default search rate limit values if no separate search info is available
                 self._rate_limit_cache[RateLimitType.SEARCH] = RateLimitInfo(
-                    limit=30, remaining=30, reset_time=int(now.timestamp()) + DEFAULT_RATE_LIMIT_RESET_TIME, used=0
+                    limit=30, remaining=30, reset_time=now + timedelta(seconds=DEFAULT_RATE_LIMIT_RESET_TIME), used=0
                 )
 
             self._last_rate_limit_check = now
@@ -155,10 +155,10 @@ class GitHubAPIClient:
             # Don't spam warnings, just use default values
             if not self._rate_limit_cache:
                 self._rate_limit_cache[RateLimitType.CORE] = RateLimitInfo(
-                    limit=5000, remaining=5000, reset_time=int(now.timestamp()) + DEFAULT_RATE_LIMIT_RESET_TIME, used=0
+                    limit=5000, remaining=5000, reset_time=now + timedelta(seconds=DEFAULT_RATE_LIMIT_RESET_TIME), used=0
                 )
                 self._rate_limit_cache[RateLimitType.SEARCH] = RateLimitInfo(
-                    limit=30, remaining=30, reset_time=int(now.timestamp()) + DEFAULT_RATE_LIMIT_RESET_TIME, used=0
+                    limit=30, remaining=30, reset_time=now + timedelta(seconds=DEFAULT_RATE_LIMIT_RESET_TIME), used=0
                 )
     
     def get_rate_limit_info(self, rate_type: RateLimitType = RateLimitType.CORE) -> Optional[RateLimitInfo]:
