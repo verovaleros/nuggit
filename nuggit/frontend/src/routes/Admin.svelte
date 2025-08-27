@@ -8,6 +8,7 @@
 
 <script>
   import { onMount } from 'svelte';
+  import { push } from 'svelte-spa-router';
   import { authStore } from '../lib/stores/authStore.js';
   import { apiClient, ApiError } from '../lib/api/apiClient.js';
 
@@ -62,27 +63,39 @@
       loading = true;
       error = null;
 
+      // Check authentication before loading data
+      if (!authState.isAuthenticated) {
+        error = 'Authentication required. Please log in.';
+        push('/login');
+        return;
+      }
+
+      if (!isAdmin) {
+        error = 'Admin privileges required to access this page.';
+        push('/home');
+        return;
+      }
+
       // Load admin statistics and data
-      // Note: These endpoints would need to be implemented in the backend
       const [statsResponse, usersResponse, reposResponse] = await Promise.allSettled([
         loadStats(),
         loadUsers(),
         loadRepositories()
       ]);
 
-      if (statsResponse.status === 'fulfilled') {
+      if (statsResponse.status === 'fulfilled' && statsResponse.value) {
         stats = statsResponse.value;
       }
-      if (usersResponse.status === 'fulfilled') {
+      if (usersResponse.status === 'fulfilled' && usersResponse.value) {
         users = usersResponse.value;
       }
-      if (reposResponse.status === 'fulfilled') {
+      if (reposResponse.status === 'fulfilled' && reposResponse.value) {
         repositories = reposResponse.value;
       }
 
     } catch (err) {
       console.error('Error loading admin data:', err);
-      error = 'Failed to load admin data';
+      error = 'Failed to load admin data. Please try again.';
     } finally {
       loading = false;
     }
@@ -104,6 +117,20 @@
       };
     } catch (error) {
       console.error('Error loading admin stats:', error);
+
+      // Handle authentication errors specifically
+      if (error.status === 401 || error.status === 403) {
+        error = 'Authentication required. Please log in as an administrator.';
+        // Redirect to login if not authenticated
+        push('/login');
+        return null;
+      }
+
+      // Handle other errors
+      if (error.status >= 500) {
+        error = 'Server error occurred while loading statistics. Please try again later.';
+      }
+
       return {
         totalUsers: 0,
         totalRepositories: 0,
@@ -124,6 +151,19 @@
       return response.users || [];
     } catch (error) {
       console.error('Error loading users:', error);
+
+      // Handle authentication errors specifically
+      if (error.status === 401 || error.status === 403) {
+        error = 'Authentication required. Please log in as an administrator.';
+        push('/login');
+        return [];
+      }
+
+      // Handle other errors
+      if (error.status >= 500) {
+        error = 'Server error occurred while loading users. Please try again later.';
+      }
+
       return [];
     }
   }
@@ -135,6 +175,19 @@
       return response.repositories || [];
     } catch (error) {
       console.error('Error loading repositories:', error);
+
+      // Handle authentication errors specifically
+      if (error.status === 401 || error.status === 403) {
+        error = 'Authentication required. Please log in as an administrator.';
+        push('/login');
+        return [];
+      }
+
+      // Handle other errors
+      if (error.status >= 500) {
+        error = 'Server error occurred while loading repositories. Please try again later.';
+      }
+
       return [];
     }
   }
