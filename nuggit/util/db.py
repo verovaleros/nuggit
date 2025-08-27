@@ -123,7 +123,7 @@ def _legacy_initialize_database() -> None:
 
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS repositories (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
