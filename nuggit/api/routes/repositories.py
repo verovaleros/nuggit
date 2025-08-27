@@ -3,6 +3,7 @@ import re
 import time
 import random
 import logging
+import urllib.parse
 from typing import Optional, List, Callable, Any, Dict, Tuple
 
 from fastapi import APIRouter, HTTPException, Body, Query, Depends
@@ -282,8 +283,11 @@ def check_repository(repo_id: str, current_user: dict = Depends(get_current_user
         HTTPException: 401 if not authenticated.
         HTTPException: 500 if an error occurs during lookup.
     """
+    # URL-decode the repository ID to handle URL-encoded slashes
+    decoded_repo_id = urllib.parse.unquote(repo_id)
+
     try:
-        repo = get_repository(repo_id)
+        repo = get_repository(decoded_repo_id)
 
         # Check if user has access to this repository
         if repo and not check_repository_access(repo, current_user):
@@ -292,7 +296,7 @@ def check_repository(repo_id: str, current_user: dict = Depends(get_current_user
 
         return {"exists": bool(repo), "repository": repo}
     except Exception as e:
-        logging.error(f"Error checking repository {repo_id}: {e}")
+        logging.error(f"Error checking repository {decoded_repo_id}: {e}")
         raise database_error("Failed to check repository existence")
 
 
@@ -361,17 +365,20 @@ def update_metadata(
         HTTPException: 404 if repo not found.
         HTTPException: 500 if metadata update fails.
     """
-    repo = get_repository(repo_id)
+    # URL-decode the repository ID to handle URL-encoded slashes
+    decoded_repo_id = urllib.parse.unquote(repo_id)
+
+    repo = get_repository(decoded_repo_id)
     if not repo:
-        raise HTTPException(404, f"{repo_id} not found")
+        raise HTTPException(404, f"{decoded_repo_id} not found")
 
     # Check if user has access to this repository
     if not check_repository_access(repo, current_user):
         raise HTTPException(403, "You don't have access to this repository")
 
-    if not update_repository_metadata(repo_id, meta.tags, meta.notes):
+    if not update_repository_metadata(decoded_repo_id, meta.tags, meta.notes):
         raise HTTPException(500, "Metadata update failed")
-    return {"message": f"Metadata for '{repo_id}' updated.", "repository": get_repository(repo_id)}
+    return {"message": f"Metadata for '{decoded_repo_id}' updated.", "repository": get_repository(decoded_repo_id)}
 
 
 @router.put("/{repo_id:path}", summary="Update repository information from GitHub")
@@ -396,10 +403,13 @@ def update_repository(
         HTTPException: 404 if repository not found in DB or on GitHub.
         HTTPException: 500 on other errors.
     """
-    existing = get_repository(repo_id)
+    # URL-decode the repository ID to handle URL-encoded slashes
+    decoded_repo_id = urllib.parse.unquote(repo_id)
+
+    existing = get_repository(decoded_repo_id)
     if not existing:
-        raise HTTPException(404, f"{repo_id} not in DB")
-    owner, name = repo_id.split('/', 1)
+        raise HTTPException(404, f"{decoded_repo_id} not in DB")
+    owner, name = decoded_repo_id.split('/', 1)
     repo_info = retry_github(
         get_repo_info,
         owner,
@@ -411,8 +421,8 @@ def update_repository(
     # Don't change user_id for existing repositories during updates
     insert_or_update_repo(repo_info)
     # Create a new version to track this update
-    create_repository_version(repo_id, repo_info)
-    return {"message": f"Repository '{repo_id}' updated and versioned successfully.", "repository": repo_info}
+    create_repository_version(decoded_repo_id, repo_info)
+    return {"message": f"Repository '{decoded_repo_id}' updated and versioned successfully.", "repository": repo_info}
 
 
 @router.post("/batch", summary="Import multiple repositories at once")
@@ -527,9 +537,12 @@ def update_fields(
         HTTPException: 400 if no fields provided.
         HTTPException: 500 if update fails.
     """
-    existing = get_repository(repo_id)
+    # URL-decode the repository ID to handle URL-encoded slashes
+    decoded_repo_id = urllib.parse.unquote(repo_id)
+
+    existing = get_repository(decoded_repo_id)
     if not existing:
-        raise HTTPException(404, f"{repo_id} not found")
+        raise HTTPException(404, f"{decoded_repo_id} not found")
 
     # Check if user has access to this repository
     if not check_repository_access(existing, current_user):
@@ -538,9 +551,9 @@ def update_fields(
     data_to_update = {k: v for k, v in fields.dict().items() if v is not None}
     if not data_to_update:
         raise HTTPException(400, "No fields to update")
-    if not update_repository_fields(repo_id, data_to_update):
+    if not update_repository_fields(decoded_repo_id, data_to_update):
         raise HTTPException(500, "Field update failed")
-    return {"message": f"Fields for '{repo_id}' updated.", "repository": get_repository(repo_id)}
+    return {"message": f"Fields for '{decoded_repo_id}' updated.", "repository": get_repository(decoded_repo_id)}
 
 
 @router.delete("/{repo_id:path}", summary="Delete a repository from the database")
@@ -563,13 +576,16 @@ def delete_repository(repo_id: str, current_user: dict = Depends(get_current_use
         HTTPException: 404 if repo not found.
         HTTPException: 500 if delete fails.
     """
-    repo = get_repository(repo_id)
+    # URL-decode the repository ID to handle URL-encoded slashes
+    decoded_repo_id = urllib.parse.unquote(repo_id)
+
+    repo = get_repository(decoded_repo_id)
     if not repo:
-        raise HTTPException(404, f"{repo_id} not found")
+        raise HTTPException(404, f"{decoded_repo_id} not found")
 
     # Check if user has access to this repository
     if not check_repository_access(repo, current_user):
         raise HTTPException(403, "You don't have access to this repository")
-    if not db_delete_repository(repo_id):
+    if not db_delete_repository(decoded_repo_id):
         raise HTTPException(500, "Delete failed")
-    return {"message": f"Repository '{repo_id}' deleted successfully."}
+    return {"message": f"Repository '{decoded_repo_id}' deleted successfully."}
