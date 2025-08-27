@@ -34,7 +34,18 @@ class ConnectionInfo:
 
 
 class ConnectionPool:
-    """Thread-safe SQLite connection pool with leak detection."""
+    """Thread-safe SQLite connection pool with leak detection.
+
+    This pool manages SQLite connections with check_same_thread=False, which disables
+    SQLite's built-in thread safety checks. The pool ensures thread safety by:
+    1. Using locks to synchronize access to the connection pool
+    2. Tracking which thread is using each connection
+    3. Ensuring connections are properly returned to the pool
+    4. Preventing connection sharing between threads
+
+    WARNING: Each connection must only be used by one thread at a time.
+    The pool enforces this constraint through careful connection management.
+    """
     
     def __init__(
         self,
@@ -75,6 +86,9 @@ class ConnectionPool:
             timeout=self.connection_timeout,
             detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
             check_same_thread=False  # Allow connection sharing between threads
+            # WARNING: Setting check_same_thread=False disables SQLite's thread safety.
+            # The connection pool must ensure that each connection is only used by one
+            # thread at a time.
         )
         
         # Configure connection for optimal performance and safety
