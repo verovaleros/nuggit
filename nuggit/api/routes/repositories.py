@@ -273,7 +273,7 @@ def check_repository(repo_id: str, current_user: dict = Depends(get_current_user
     Requires authentication. Users can only check their own repositories unless they are admin.
 
     Args:
-        repo_id (str): Identifier in the format 'owner/name'.
+        repo_id (str): Identifier in the format 'owner/name' (may be URL-encoded).
         current_user: The authenticated user from JWT token.
 
     Returns:
@@ -285,6 +285,7 @@ def check_repository(repo_id: str, current_user: dict = Depends(get_current_user
     """
     # URL-decode the repository ID to handle URL-encoded slashes
     decoded_repo_id = urllib.parse.unquote(repo_id)
+    logging.debug(f"Checking repository: {repo_id} -> {decoded_repo_id}")
 
     try:
         repo = get_repository(decoded_repo_id)
@@ -392,7 +393,7 @@ def update_repository(
     Update repository information from GitHub and create a new version snapshot.
 
     Args:
-        repo_id (str): Identifier in the format 'owner/name'.
+        repo_id (str): Identifier in the format 'owner/name' (may be URL-encoded).
         token (str, optional): GitHub access token.
         max_retries (int): Number of retry attempts on rate limit.
 
@@ -405,9 +406,11 @@ def update_repository(
     """
     # URL-decode the repository ID to handle URL-encoded slashes
     decoded_repo_id = urllib.parse.unquote(repo_id)
+    logging.info(f"Updating repository: {repo_id} -> {decoded_repo_id}")
 
     existing = get_repository(decoded_repo_id)
     if not existing:
+        logging.warning(f"Repository not found in database: {decoded_repo_id}")
         raise HTTPException(404, f"{decoded_repo_id} not in DB")
     owner, name = decoded_repo_id.split('/', 1)
     repo_info = retry_github(
