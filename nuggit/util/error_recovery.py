@@ -180,8 +180,8 @@ class CircuitBreaker:
                 "consecutive_failures": self.stats.consecutive_failures,
                 "consecutive_successes": self.stats.consecutive_successes,
                 "circuit_opened_count": self.stats.circuit_opened_count,
-                "last_failure_time": utc_now_iso() if self.stats.last_failure_time else None,
-                "last_success_time": utc_now_iso() if self.stats.last_success_time else None,
+                "last_failure_time": self.stats.last_failure_time.isoformat() if self.stats.last_failure_time else None,
+                "last_success_time": self.stats.last_success_time.isoformat() if self.stats.last_success_time else None,
                 "config": {
                     "failure_threshold": self.config.failure_threshold,
                     "recovery_timeout": self.config.recovery_timeout,
