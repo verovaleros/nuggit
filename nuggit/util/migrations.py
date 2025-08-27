@@ -27,6 +27,9 @@ logger = logging.getLogger(__name__)
 MIGRATIONS_DIR = Path(__file__).resolve().parent.parent / "migrations"
 MIGRATIONS_DIR.mkdir(exist_ok=True)
 
+# Migration version format (timestamp-based)
+MIGRATION_VERSION_FORMAT = "%Y%m%d%H%M%S"
+
 @dataclass
 class Migration:
     """Represents a database migration."""
@@ -380,7 +383,7 @@ def create_migration(name: str, up_sql: str, down_sql: str, dependencies: List[s
         dependencies = []
     
     # Generate version number based on timestamp
-    version = now_utc().strftime("%Y%m%d%H%M%S")
+    version = now_utc().strftime(MIGRATION_VERSION_FORMAT)
     
     # Sanitize name for filename
     safe_name = "".join(c if c.isalnum() or c in '-_' else '_' for c in name.lower())
