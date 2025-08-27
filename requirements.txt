@@ -4,3 +4,13 @@ rich
 urllib3==1.26.16
 fastapi
 uvicorn[standard]
+pydantic
+pydantic[email]
+bcrypt
+PyJWT
+jinja2
+
+# Testing
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+httpx>=0.24.0

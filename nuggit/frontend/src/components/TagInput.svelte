@@ -13,12 +13,15 @@
   const dispatch = createEventDispatcher();
 
   // Update tagArray when tags prop changes
-  $: {
-    if (typeof tags === 'string') {
-      tagArray = tags.split(',')
-        .map(tag => tag.trim())
-        .filter(tag => tag.length > 0);
-    }
+  // Use flags to prevent infinite reactive loops
+  let lastTagsValue = '';
+  let isInternalUpdate = false;
+
+  $: if (typeof tags === 'string' && tags !== lastTagsValue && !isInternalUpdate) {
+    lastTagsValue = tags;
+    tagArray = tags.split(',')
+      .map(tag => tag.trim())
+      .filter(tag => tag.length > 0);
   }
 
   // Handle input keydown events
@@ -52,17 +55,37 @@
 
   // Update the tags string and dispatch change event
   function updateTags() {
+    isInternalUpdate = true;
     tags = tagArray.join(',');
+    lastTagsValue = tags; // Update the tracking value
     dispatch('change', { tags });
+    // Reset the flag after a microtask to allow reactive statement to see the change
+    setTimeout(() => {
+      isInternalUpdate = false;
+    }, 0);
   }
 
   // Handle focus on the container to focus the input
   function handleContainerClick() {
     inputElement.focus();
   }
+
+  function handleContainerKeydown(event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      inputElement.focus();
+    }
+  }
 </script>
 
-<div class="tag-input-container" on:click={handleContainerClick}>
+<div
+  class="tag-input-container"
+  on:click={handleContainerClick}
+  on:keydown={handleContainerKeydown}
+  role="textbox"
+  tabindex="0"
+  aria-label="Tag input container"
+>
   {#each tagArray as tag, index}
     <div class="tag">
       <span class="tag-text">{tag}</span>

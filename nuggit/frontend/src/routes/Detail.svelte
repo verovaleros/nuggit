@@ -1,14 +1,35 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import TagInput from '../components/TagInput.svelte';
+  import ErrorBoundary from '../components/ErrorBoundary.svelte';
+  import { apiClient, ApiError } from '../lib/api/apiClient.js';
+  import { authStore } from '../lib/stores/authStore.js';
+  import {
+    formatDateTime,
+    formatRelativeTime,
+    formatDateTimeWithRelative,
+    formatCompactDate,
+    isValidDate
+  } from '../lib/timezone.js';
+
+  // Auth state
+  $: authState = $authStore;
+  $: isAuthenticated = authState.isAuthenticated;
+  $: currentUser = authState.user;
+
+  // Redirect to login if not authenticated
+  $: if (authState.isInitialized && !isAuthenticated) {
+    import('svelte-spa-router').then(({ push }) => {
+      sessionStorage.setItem('nuggit_redirect_after_login', window.location.hash);
+      push('/login');
+    });
+  }
 
   let repoId = null;
   let repo = null;
 
-  // Initialize repo with empty recent_commits array to avoid errors
-  $: if (repo && !repo.recent_commits) {
-    repo.recent_commits = [];
-  }
+  // Derived value to safely access recent_commits without modifying repo
+  $: recentCommits = repo?.recent_commits || [];
   let loading = true;
   let error = null;
 
@@ -49,6 +70,30 @@
   let comparisonError = null;
   let loadingComparison = false;
 
+  // Cleanup tracking for memory leak prevention
+  let activeTimeouts = new Set();
+  let activeAbortControllers = new Set();
+
+  // Helper functions for cleanup
+  function createTimeout(callback, delay) {
+    const timeoutId = setTimeout(() => {
+      activeTimeouts.delete(timeoutId);
+      callback();
+    }, delay);
+    activeTimeouts.add(timeoutId);
+    return timeoutId;
+  }
+
+  function createAbortController() {
+    const controller = new AbortController();
+    activeAbortControllers.add(controller);
+    return controller;
+  }
+
+  function clearAbortController(controller) {
+    activeAbortControllers.delete(controller);
+  }
+
   onMount(async () => {
     const hash = window.location.hash;
     const parts = hash.split('/');
@@ -67,22 +112,17 @@
       const encodedRepoId = encodeURIComponent(repoId);
 
       // Set a timeout for the fetch operation to handle offline mode gracefully
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      const controller = createAbortController();
+      const timeoutId = createTimeout(() => controller.abort(), 5000); // 5 second timeout
 
       try {
-        // Fetch repository details
-        const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`, {
-          signal: controller.signal
-        });
+        // Fetch repository details using API client
+        repo = await apiClient.getRepository(encodedRepoId);
 
         clearTimeout(timeoutId); // Clear the timeout if fetch completes
+        activeTimeouts.delete(timeoutId);
+        clearAbortController(controller);
 
-        if (!res.ok) {
-          throw new Error(await res.text());
-        }
-
-        repo = await res.json();
         tags = repo.tags ? repo.tags.join(',') : '';
         notes = repo.notes || '';
 
@@ -105,17 +145,9 @@
           error = 'Connection timed out. Loading repository from local database.';
           console.warn('Repository fetch timed out - trying to load from local database');
 
-          // Try again with a longer timeout - this will use the offline mode in the backend
+          // Try again with API client - this will use the offline mode in the backend
           try {
-            const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`, {
-              timeout: 10000 // Longer timeout for offline mode
-            });
-
-            if (!res.ok) {
-              throw new Error(await res.text());
-            }
-
-            repo = await res.json();
+            repo = await apiClient.getRepository(encodedRepoId);
             tags = repo.tags ? repo.tags.join(',') : '';
             notes = repo.notes || '';
             error = null; // Clear the error if we successfully loaded from DB
@@ -139,25 +171,12 @@
     saveStatus = 'Saving...';
     try {
       // Use the metadata endpoint for updating tags
-      // Encode the repository ID for the URL
-      const encodedRepoId = encodeURIComponent(repoId);
-
-      const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}/fields`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ tags, notes }) // Pass both tags and notes
-      });
-
-      if (!res.ok) {
-        throw new Error(await res.text());
-      }
+      await apiClient.updateRepositoryMetadata(repoId, { tags, notes });
 
       saveStatus = '✅ Saved!';
 
       // Clear the status after 3 seconds
-      setTimeout(() => {
+      createTimeout(() => {
         saveStatus = '';
       }, 3000);
     } catch (err) {
@@ -173,23 +192,17 @@
       const encodedRepoId = encodeURIComponent(repoId);
 
       // Set a timeout for the fetch operation
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
+      const controller = createAbortController();
+      const timeoutId = createTimeout(() => controller.abort(), 5000); // 5 second timeout
 
       try {
-        const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`, {
-          method: 'PUT',
-          signal: controller.signal
-        });
+        // Update repository using API client
+        const updateData = await apiClient.updateRepository(encodedRepoId, {});
 
         clearTimeout(timeoutId); // Clear the timeout if fetch completes
+        activeTimeouts.delete(timeoutId);
+        clearAbortController(controller);
 
-        if (!res.ok) {
-          throw new Error(await res.text());
-        }
-
-        // Parse the response from the update endpoint
-        const updateData = await res.json();
         console.log('Update response:', updateData);
       } catch (fetchErr) {
         if (fetchErr.name === 'AbortError') {
@@ -204,14 +217,8 @@
         // Encode the repository ID for the URL
         const encodedRepoId = encodeURIComponent(repoId);
 
-        const detailRes = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`);
-
-        if (!detailRes.ok) {
-          throw new Error(await detailRes.text());
-        }
-
         // Update the repository data with the latest information
-        repo = await detailRes.json();
+        repo = await apiClient.getRepository(encodedRepoId);
         console.log('Updated repository details:', repo);
 
         // Update the tags from the updated repository
@@ -235,7 +242,7 @@
         updateStatus = '✅ Repository updated!';
 
         // Clear the status after 1 second
-        setTimeout(() => {
+        createTimeout(() => {
           updateStatus = '';
         }, 1000);
       } catch (detailErr) {
@@ -250,16 +257,8 @@
 
   async function deleteRepository() {
     try {
-      // Encode the repository ID for the URL
-      const encodedRepoId = encodeURIComponent(repoId);
-
-      const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}`, {
-        method: 'DELETE'
-      });
-
-      if (!res.ok) {
-        throw new Error(await res.text());
-      }
+      // Delete repository using API client
+      await apiClient.deleteRepository(repoId);
 
       // Redirect to home page after successful deletion
       window.location.hash = '';
@@ -283,6 +282,13 @@
     commentsCollapsed = !commentsCollapsed;
   }
 
+  function handleCommentsKeydown(event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      toggleComments();
+    }
+  }
+
   // State for commit loading
   let loadingCommits = false;
   let commitsError = null;
@@ -291,8 +297,15 @@
     commitsCollapsed = !commitsCollapsed;
 
     // If we're expanding the commits section and there are no commits yet, fetch them
-    if (!commitsCollapsed && (!repo.recent_commits || repo.recent_commits.length === 0)) {
+    if (!commitsCollapsed && recentCommits.length === 0) {
       await fetchCommits();
+    }
+  }
+
+  async function handleCommitsKeydown(event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      await toggleCommits();
     }
   }
 
@@ -303,40 +316,14 @@
         return false;
       }
 
-      // Properly encode the repository ID for the URL
+      console.log('Checking if repository exists:', repoId);
+
+      // Use API client for authenticated requests
       const encodedRepoId = encodeURIComponent(repoId);
-      const checkUrl = `http://localhost:8001/repositories/check/${encodedRepoId}`;
-      console.log('Checking if repository exists:', checkUrl);
-      console.log('Repository ID being checked:', repoId);
+      const data = await apiClient.request(`/repositories/check/${encodedRepoId}`);
 
-      // Set a timeout for the fetch operation
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 second timeout
-
-      try {
-        const res = await fetch(checkUrl, {
-          signal: controller.signal,
-          headers: {
-            'Accept': 'application/json'
-          }
-        });
-
-        clearTimeout(timeoutId); // Clear the timeout if fetch completes
-
-        if (!res.ok) {
-          console.error('Error checking repository:', await res.text());
-          return false;
-        }
-
-        const data = await res.json();
-        console.log('Repository check response:', data);
-        return data.exists;
-      } catch (fetchErr) {
-        if (fetchErr.name === 'AbortError') {
-          console.warn('Repository check timed out');
-        }
-        throw fetchErr;
-      }
+      console.log('Repository check response:', data);
+      return data.exists;
     } catch (err) {
       console.error('Error checking if repository exists:', err);
       return false;
@@ -374,51 +361,49 @@
       console.log('Encoded repository ID:', encodedRepoId);
 
       // Set a timeout for the fetch operation
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout (increased from 5)
+      const controller = createAbortController();
+      const timeoutId = createTimeout(() => controller.abort(), 10000); // 10 second timeout (increased from 5)
 
       try {
-        // Log the URL we're fetching from - make sure to include trailing slash
-        const url = `http://localhost:8001/repositories/${encodedRepoId}/commits/`;
-        console.log('Fetching commits from URL:', url);
+        // Check authentication before making API calls
+        const token = authStore.getToken();
+        const user = authStore.getUser();
 
-        const res = await fetch(url, {
-          signal: controller.signal,
-          headers: {
-            'Accept': 'application/json'
-          }
-        });
+        if (!token) {
+          throw new Error('Please log in to view repository commits');
+        }
+
+        console.log('Fetching commits for repository:', repoId);
+
+        const commits = await apiClient.getRepositoryCommits(repoId, 10);
 
         clearTimeout(timeoutId); // Clear the timeout if fetch completes
+        activeTimeouts.delete(timeoutId);
+        clearAbortController(controller);
 
-        if (!res.ok) {
-          const errorText = await res.text();
-          console.error('Error response from commits API:', errorText);
-          throw new Error(errorText || `HTTP error ${res.status}`);
+        // Validate that we received an array
+        if (!Array.isArray(commits)) {
+          console.error('Invalid commits response format:', commits);
+          throw new Error('Invalid response format from server');
         }
 
-        // Try to parse the JSON response
-        try {
-          const commits = await res.json();
+        repo.recent_commits = commits;
+        console.log('Commits fetched successfully:', commits);
+      } catch (apiErr) {
+        clearTimeout(timeoutId);
+        activeTimeouts.delete(timeoutId);
+        clearAbortController(controller);
 
-          // Validate that we received an array
-          if (!Array.isArray(commits)) {
-            console.error('Invalid commits response format:', commits);
-            throw new Error('Invalid response format from server');
-          }
-
-          repo.recent_commits = commits;
-          console.log('Commits fetched successfully:', commits);
-        } catch (jsonErr) {
-          console.error('Error parsing commits JSON:', jsonErr);
-          throw new Error('Invalid JSON response from server');
-        }
-      } catch (fetchErr) {
-        if (fetchErr.name === 'AbortError') {
+        if (apiErr.name === 'AbortError') {
           commitsError = 'Failed to load commits: Connection timed out';
           console.warn('Commits fetch timed out');
+          return; // Don't throw, just set error and return
+        } else if (apiErr.message && apiErr.message.includes('Repository not found')) {
+          throw new Error('Repository not found in database');
+        } else if (apiErr.message && apiErr.message.includes('access')) {
+          throw new Error('You don\'t have access to this repository');
         } else {
-          throw fetchErr;
+          throw apiErr;
         }
       }
     } catch (err) {
@@ -433,6 +418,13 @@
     versionsCollapsed = !versionsCollapsed;
   }
 
+  function handleVersionsKeydown(event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      toggleVersions();
+    }
+  }
+
   function toggleComparison() {
     showComparison = !showComparison;
     if (!showComparison) {
@@ -441,6 +433,13 @@
       selectedVersion2 = null;
       comparisonResult = null;
       comparisonError = null;
+    }
+  }
+
+  function handleComparisonKeydown(event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      toggleComparison();
     }
   }
 
@@ -567,89 +566,17 @@
             </div>`;
   }
 
-  // Format date to human-readable format
+  // Format date to human-readable format (using timezone utilities)
   function formatDate(dateString) {
-    if (!dateString) return 'N/A';
-
-    try {
-      const date = new Date(dateString);
-
-      // Check if date is valid
-      if (isNaN(date.getTime())) return dateString;
-
-      // Format options
-      const options = {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        timeZoneName: 'short'
-      };
-
-      return date.toLocaleDateString(undefined, options);
-    } catch (error) {
-      console.error('Error formatting date:', error);
-      return dateString;
-    }
+    return formatDateTime(dateString, { includeTime: true, includeTimezone: true });
   }
 
-  // Format date with days ago
+  // Format date with relative time (using timezone utilities)
   function formatDateWithDaysAgo(dateString) {
-    if (!dateString) return 'N/A';
-
-    try {
-      const date = new Date(dateString);
-
-      // Check if date is valid
-      if (isNaN(date.getTime())) return dateString;
-
-      // Format the date
-      const formattedDate = formatDate(dateString);
-
-      // Calculate days ago
-      const now = new Date();
-      const diffTime = Math.abs(now - date);
-      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-
-      // Return formatted string
-      return `${formattedDate} (${diffDays} ${diffDays === 1 ? 'day' : 'days'} ago)`;
-    } catch (error) {
-      console.error('Error formatting date with days ago:', error);
-      return dateString;
-    }
+    return formatDateTimeWithRelative(dateString, { includeTime: true, includeTimezone: true });
   }
 
-  // Format relative time (e.g., "2 days ago")
-  function formatRelativeTime(dateString) {
-    if (!dateString) return 'N/A';
 
-    try {
-      const date = new Date(dateString);
-
-      // Check if date is valid
-      if (isNaN(date.getTime())) return dateString;
-
-      const now = new Date();
-      const diffMs = now - date;
-      const diffSec = Math.floor(diffMs / 1000);
-      const diffMin = Math.floor(diffSec / 60);
-      const diffHour = Math.floor(diffMin / 60);
-      const diffDay = Math.floor(diffHour / 24);
-      const diffMonth = Math.floor(diffDay / 30);
-      const diffYear = Math.floor(diffDay / 365);
-
-      if (diffSec < 60) return 'just now';
-      if (diffMin < 60) return `${diffMin} minute${diffMin === 1 ? '' : 's'} ago`;
-      if (diffHour < 24) return `${diffHour} hour${diffHour === 1 ? '' : 's'} ago`;
-      if (diffDay < 30) return `${diffDay} day${diffDay === 1 ? '' : 's'} ago`;
-      if (diffMonth < 12) return `${diffMonth} month${diffMonth === 1 ? '' : 's'} ago`;
-      return `${diffYear} year${diffYear === 1 ? '' : 's'} ago`;
-    } catch (error) {
-      console.error('Error formatting relative time:', error);
-      return dateString;
-    }
-  }
 
   async function addVersion() {
     if (!newVersion.trim()) {
@@ -711,7 +638,7 @@
       versionStatus = '✅ Version added!';
 
       // Clear the status after 3 seconds
-      setTimeout(() => {
+      createTimeout(() => {
         versionStatus = '';
       }, 3000);
     } catch (err) {
@@ -732,26 +659,11 @@
     commentStatus = 'Adding comment...';
 
     try {
-      // Encode the repository ID for the URL
-      const encodedRepoId = encodeURIComponent(repoId);
-
-      const res = await fetch(`http://localhost:8001/repositories/${encodedRepoId}/comments`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          comment: newComment.trim(),
-          author: commentAuthor.trim() || 'Anonymous'
-        })
+      // Add comment using API client
+      const newCommentData = await apiClient.addRepositoryComment(repoId, {
+        comment: newComment.trim(),
+        author: commentAuthor.trim() || 'Anonymous'
       });
-
-      if (!res.ok) {
-        throw new Error(await res.text());
-      }
-
-      // Get the new comment
-      const newCommentData = await res.json();
 
       // Add the new comment to the list
       repo.comments = [newCommentData, ...repo.comments];
@@ -761,7 +673,7 @@
       commentStatus = '✅ Comment added!';
 
       // Clear the status after 3 seconds
-      setTimeout(() => {
+      createTimeout(() => {
         commentStatus = '';
       }, 3000);
     } catch (err) {
@@ -771,6 +683,20 @@
       addingComment = false;
     }
   }
+
+  onDestroy(() => {
+    // Clear all active timeouts
+    activeTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
+    activeTimeouts.clear();
+
+    // Abort all active controllers
+    activeAbortControllers.forEach(controller => {
+      if (!controller.signal.aborted) {
+        controller.abort();
+      }
+    });
+    activeAbortControllers.clear();
+  });
 </script>
 
 <style>
@@ -778,6 +704,74 @@
     max-width: 1200px;
     margin: 2rem auto;
     font-family: sans-serif;
+  }
+
+  /* Authentication Message Styles */
+  .auth-message {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 60vh;
+  }
+
+  .auth-card {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    padding: 3rem;
+    text-align: center;
+    max-width: 400px;
+    width: 100%;
+  }
+
+  .auth-card h2 {
+    color: #333;
+    margin-bottom: 1rem;
+    font-size: 1.5rem;
+  }
+
+  .auth-card p {
+    color: #666;
+    margin-bottom: 2rem;
+    line-height: 1.6;
+  }
+
+  .auth-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+  }
+
+  .btn {
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    border: none;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  }
+
+  .btn-outline {
+    background: transparent;
+    color: #667eea;
+    border: 2px solid #667eea;
+  }
+
+  .btn-outline:hover {
+    background: #667eea;
+    color: white;
   }
 
   h1, h2 {
@@ -1070,9 +1064,6 @@
   }
 
   /* Comments styles */
-  .comments-section {
-    margin-top: 2rem;
-  }
 
   .comments-list {
     margin-top: 1rem;
@@ -1149,16 +1140,13 @@
     padding: 0.5rem 0.75rem;
   }
 
-  .comment-status, .version-status {
+  .comment-status {
     margin-top: 0.5rem;
     text-align: center;
     font-style: italic;
   }
 
   /* Version tracker styles */
-  .versions-section {
-    margin-top: 2rem;
-  }
 
   .versions-list {
     margin-top: 1rem;
@@ -1278,37 +1266,6 @@
   }
 
   /* Version comparison styles */
-  .comparison-container {
-    margin-top: 1.5rem;
-    background-color: white;
-    border-radius: 8px;
-    padding: 1.5rem;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    border: 1px solid #e5e7eb;
-  }
-
-  .comparison-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1.5rem;
-    padding-bottom: 0.75rem;
-    border-bottom: 1px solid #e5e7eb;
-  }
-
-  .comparison-header h3 {
-    margin: 0;
-    font-size: 1.2rem;
-    color: #1f2937;
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .comparison-header button {
-    padding: 0.4rem 0.8rem;
-    font-size: 0.9rem;
-  }
 
   .comparison-selectors {
     display: grid;
@@ -1351,17 +1308,7 @@
     margin-top: 1.5rem;
   }
 
-  .comparison-section {
-    margin-bottom: 2rem;
-  }
 
-  .comparison-section h3 {
-    font-size: 1.2rem;
-    color: #1f2937;
-    margin-bottom: 1rem;
-    padding-bottom: 0.5rem;
-    border-bottom: 1px solid #e5e7eb;
-  }
 
   .comparison-grid {
     display: grid;
@@ -1397,23 +1344,7 @@
     line-height: 1.5;
   }
 
-  .diff-line-added {
-    color: #16a34a;
-    background-color: #dcfce7;
-    display: block;
-    padding: 0.1rem 0.3rem;
-    margin: 0.1rem 0;
-    border-radius: 3px;
-  }
 
-  .diff-line-removed {
-    color: #dc2626;
-    background-color: #fee2e2;
-    display: block;
-    padding: 0.1rem 0.3rem;
-    margin: 0.1rem 0;
-    border-radius: 3px;
-  }
 
   /* Metric comparison styles */
   .metric-card {
@@ -1441,7 +1372,7 @@
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
   }
 
-  .old-value, .new-value, .value {
+  .old-value, .new-value {
     font-weight: bold;
     font-size: 1.1rem;
     padding: 0.25rem 0.5rem;
@@ -1494,13 +1425,7 @@
     font-weight: bold;
   }
 
-  .text-change {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    padding: 0.75rem;
-  }
+
 
   .comparison-error {
     color: #dc2626;
@@ -1530,13 +1455,7 @@
     background-color: #4338ca;
   }
 
-  .close-comparison-button {
-    background-color: #6b7280;
-  }
 
-  .close-comparison-button:hover {
-    background-color: #4b5563;
-  }
 
   /* Collapsible section styles */
   .section-header {
@@ -1691,6 +1610,44 @@
     color: #4b5563;
   }
 
+  /* Star Chart Styles */
+  .star-chart-container {
+    background-color: white;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+  }
+
+  .star-chart-container h3 {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    color: #1f2937;
+    border-bottom: 1px solid #e5e7eb;
+    padding-bottom: 0.5rem;
+  }
+
+  .star-chart-wrapper {
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #e5e7eb;
+  }
+
+  .star-chart-wrapper img {
+    display: block;
+    border: none;
+    border-radius: 8px;
+    max-width: 100%;
+    height: auto;
+  }
+
+  @media (max-width: 768px) {
+    .star-chart-wrapper img {
+      width: 100% !important;
+      height: auto !important;
+    }
+  }
+
   .commits-error {
     padding: 1rem;
     text-align: center;
@@ -1712,8 +1669,9 @@
   }
 </style>
 
-<div class="container">
-  <div class="nav-back">
+<ErrorBoundary>
+  <div class="container">
+    <div class="nav-back">
     <button on:click={() => (window.location.hash = '')}>
       <span>&larr;</span> Back to Home
     </button>
@@ -1721,7 +1679,19 @@
       <span>+</span> Add Repositories
     </button>
   </div>
-  {#if loading}
+  {#if !isAuthenticated}
+    <!-- Unauthenticated User Message -->
+    <div class="auth-message">
+      <div class="auth-card">
+        <h2>🔐 Authentication Required</h2>
+        <p>Please sign in to view repository details and manage your data.</p>
+        <div class="auth-actions">
+          <a href="#/login" class="btn btn-primary">Sign In</a>
+          <a href="#/register" class="btn btn-outline">Create Account</a>
+        </div>
+      </div>
+    </div>
+  {:else if loading}
     <div style="text-align: center; padding: 3rem 0;">
       <h1>Loading repository data…</h1>
     </div>
@@ -1858,6 +1828,19 @@
       {/if}
     </div>
 
+    <!-- Star Growth Chart -->
+    <div class="star-chart-container">
+      <h3>⭐ Star Growth History</h3>
+      <div class="star-chart-wrapper">
+        <img
+          src="https://api.star-history.com/svg?repos={repo.id}&type=Date"
+          alt="Star History Chart for {repo.id}"
+          style="width: 100%; height: auto; max-width: 100%;"
+          loading="lazy"
+        />
+      </div>
+    </div>
+
     {#if showDeleteConfirm}
       <div class="modal-overlay">
         <div class="modal">
@@ -1878,12 +1861,20 @@
     {/if}
 
     <!-- Comments Section (Collapsible) -->
-    <div class="section-header" on:click={toggleComments}>
+    <div
+      class="section-header"
+      on:click={toggleComments}
+      on:keydown={handleCommentsKeydown}
+      role="button"
+      tabindex="0"
+      aria-expanded={!commentsCollapsed}
+      aria-controls="comments-content"
+    >
       <h2>💬 Comments</h2>
       <span class="toggle-icon {commentsCollapsed ? 'collapsed' : ''}">▾</span>
     </div>
 
-    <div class="section-content {commentsCollapsed ? 'collapsed' : ''}">
+    <div id="comments-content" class="section-content {commentsCollapsed ? 'collapsed' : ''}">
       <!-- Comment form -->
       <div class="comment-form">
         <div class="comment-form-header">
@@ -1931,12 +1922,20 @@
     </div>
 
     <!-- Version Tracker Section (Collapsible) -->
-    <div class="section-header" on:click={toggleVersions}>
+    <div
+      class="section-header"
+      on:click={toggleVersions}
+      on:keydown={handleVersionsKeydown}
+      role="button"
+      tabindex="0"
+      aria-expanded={!versionsCollapsed}
+      aria-controls="versions-content"
+    >
       <h2>📈 Version Tracker</h2>
       <span class="toggle-icon {versionsCollapsed ? 'collapsed' : ''}">▾</span>
     </div>
 
-    <div class="section-content {versionsCollapsed ? 'collapsed' : ''}">
+    <div id="versions-content" class="section-content {versionsCollapsed ? 'collapsed' : ''}">
       <!-- Version form -->
       <div class="version-form">
         <div class="version-form-row">
@@ -1997,12 +1996,20 @@
     </div>
 
     <!-- Compare Versions Section (Collapsible) -->
-    <div class="section-header" on:click={toggleComparison}>
+    <div
+      class="section-header"
+      on:click={toggleComparison}
+      on:keydown={handleComparisonKeydown}
+      role="button"
+      tabindex="0"
+      aria-expanded={showComparison}
+      aria-controls="comparison-content"
+    >
       <h2>🔍 Compare Versions</h2>
       <span class="toggle-icon {!showComparison ? 'collapsed' : ''}">▾</span>
     </div>
 
-    <div class="section-content {!showComparison ? 'collapsed' : ''}">
+    <div id="comparison-content" class="section-content {!showComparison ? 'collapsed' : ''}">
       {#if repo.versions && repo.versions.length > 1}
         <div class="comparison-selectors">
           <div class="comparison-selector">
@@ -2273,12 +2280,20 @@
     </div>
 
     <!-- Recent Commits Section (Collapsible) -->
-    <div class="section-header" on:click={toggleCommits}>
+    <div
+      class="section-header"
+      on:click={toggleCommits}
+      on:keydown={handleCommitsKeydown}
+      role="button"
+      tabindex="0"
+      aria-expanded={!commitsCollapsed}
+      aria-controls="commits-content"
+    >
       <h2>🕘 Recent Commits</h2>
       <span class="toggle-icon {commitsCollapsed ? 'collapsed' : ''}">▾</span>
     </div>
 
-    <div class="section-content {commitsCollapsed ? 'collapsed' : ''}">
+    <div id="commits-content" class="section-content {commitsCollapsed ? 'collapsed' : ''}">
       {#if loadingCommits}
         <div class="loading-commits">
           <p style="text-align: center;">Loading commits from GitHub...</p>
@@ -2290,7 +2305,7 @@
             <button on:click={fetchCommits} class="retry-button">Retry</button>
           </div>
         </div>
-      {:else if repo.recent_commits && repo.recent_commits.length > 0}
+      {:else if recentCommits.length > 0}
         <table>
           <thead>
             <tr>
@@ -2301,7 +2316,7 @@
             </tr>
           </thead>
           <tbody>
-            {#each repo.recent_commits as commit}
+            {#each recentCommits as commit}
               <tr>
                 <td>{formatDateWithDaysAgo(commit.date)}</td>
                 <td>{commit.sha}</td>
@@ -2316,4 +2331,5 @@
       {/if}
     </div>
   {/if}
-</div>
+  </div>
+</ErrorBoundary>

@@ -1,0 +1,23 @@
+🔍 NUGGIT - EMAIL VERIFICATION
+================================
+
+Welcome to Nuggit!
+
+Hello {{ username }},
+
+Thank you for signing up for Nuggit! To complete your registration and start tracking your GitHub repositories, please verify your email address.
+
+Verification Link:
+{{ verification_url }}
+
+⚠️ SECURITY NOTICE:
+If you didn't create this account, you can safely ignore this email. Your email address will not be used for anything else.
+
+This verification link will expire in 24 hours for security reasons.
+
+Best regards,
+The Nuggit Team
+
+---
+Nuggit - Track and manage your GitHub repositories
+{{ base_url }}

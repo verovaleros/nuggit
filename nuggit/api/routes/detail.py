@@ -4,7 +4,7 @@ import asyncio
 from functools import lru_cache
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Body, Query, status
+from fastapi import APIRouter, HTTPException, Body, Query, status, Depends
 from pydantic import BaseModel
 from github import Github, GithubException
 
@@ -15,10 +15,35 @@ from nuggit.util.async_db import (
     get_comments as db_get_comments,
     get_versions as db_get_versions,
 )
+from nuggit.util.db import get_repository
+from nuggit.api.routes.auth import get_current_user
 from nuggit.util.github import get_recent_commits
+from nuggit.api.routes.auth import get_current_user
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def check_repository_access(repo: dict, current_user: dict) -> bool:
+    """
+    Check if the current user has access to the repository.
+
+    Args:
+        repo: Repository data from database
+        current_user: Current authenticated user (can be None if not authenticated)
+
+    Returns:
+        bool: True if user has access, False otherwise
+    """
+    if not repo or not current_user:
+        return False
+
+    # Admin users can access all repositories
+    if current_user.get("is_admin", False):
+        return True
+
+    # Regular users can only access their own repositories
+    return repo.get("user_id") == current_user.get("id")
 
 
 @lru_cache()
@@ -163,7 +188,7 @@ async def fetch_recent_commits(
                 lambda: get_recent_commits(
                     gh_client.get_repo(repo_id),
                     limit=limit,
-                    max_retries=0  # No retries to avoid delays
+                    max_retries=1  # Allow 1 retry for reliability
                 )
             ),
             timeout=timeout
@@ -179,17 +204,234 @@ async def fetch_recent_commits(
     return []
 
 
+# Test endpoints removed - routing issue fixed
+
+@router.get(
+    "/{repo_id:path}/commits/",
+    response_model=List[CommitSchema],
+    summary="Get recent commits for a repository",
+)
+async def get_repository_commits(
+    repo_id: str,
+    limit: int = Query(10, description="Maximum number of commits to return"),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Get recent commits for a repository.
+
+    Requires authentication. Users can only access commits for their own repositories unless they are admin.
+
+    Args:
+        repo_id (str): The ID of the repository.
+        limit (int, optional): Maximum number of commits to return. Defaults to 10.
+        current_user: The authenticated user from JWT token.
+
+    Returns:
+        List[CommitSchema]: A list of recent commits.
+
+    Raises:
+        HTTPException (401): If not authenticated.
+        HTTPException (403): If user doesn't have access to this repository.
+        HTTPException (404): If the repository is not found.
+        HTTPException (500): If commits retrieval fails.
+    """
+    # URL-decode the repository ID to handle URL-encoded slashes
+    import urllib.parse
+    decoded_repo_id = urllib.parse.unquote(repo_id)
+    logger.info(f"COMMITS ENDPOINT: Looking up repository with ID: {decoded_repo_id} (original: {repo_id})")
+
+    repo = await db_get_repository(decoded_repo_id)
+    logger.info(f"COMMITS ENDPOINT: Repository lookup result: {repo is not None}")
+    if repo:
+        logger.info(f"COMMITS ENDPOINT: Found repository: {repo['id']}")
+
+    if not repo:
+        logger.error(f"COMMITS ENDPOINT: Repository not found for ID: {decoded_repo_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Repository not found"
+        )
+
+    # Check if user has access to this repository
+    if not check_repository_access(repo, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this repository"
+        )
+
+    # Check if we can connect to GitHub
+    offline_mode = False
+    try:
+        # Try to make a quick connection to GitHub to check if we're online
+        import socket
+        socket.create_connection(("api.github.com", 443), timeout=1)
+    except (socket.timeout, socket.error):
+        # If we can't connect, assume we're offline
+        logger.warning("Cannot connect to GitHub - operating in offline mode")
+        offline_mode = True
+
+    gh_client = get_gh_client()
+
+    try:
+        commits = await fetch_recent_commits(gh_client, decoded_repo_id, limit=limit, offline_mode=offline_mode)
+        return commits
+    except Exception as e:
+        logger.error(f"Error retrieving commits for {decoded_repo_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get commits"
+        )
+
+
+# MOVED TO END OF FILE TO AVOID CATCHING SPECIFIC ROUTES
+
+
+# Metadata endpoint removed - using repositories.py endpoint instead to avoid routing conflicts
+
+
+@router.post(
+    "/{repo_id:path}/comments",
+    response_model=CommentResponse,
+    summary="Add a comment to a repository",
+)
+async def add_repository_comment(
+    repo_id: str,
+    comment_data: CommentCreate = Body(...),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Add a comment to a repository.
+
+    Requires authentication. Users can only add comments to their own repositories unless they are admin.
+
+    Args:
+        repo_id (str): The ID of the repository.
+        comment_data (CommentCreate): The comment payload.
+        current_user: The authenticated user from JWT token.
+
+    Returns:
+        CommentResponse: The newly created comment.
+
+    Raises:
+        HTTPException (404): If the repository is not found.
+        HTTPException (500): If the comment creation fails.
+    """
+    # URL-decode the repository ID to handle URL-encoded slashes
+    import urllib.parse
+    decoded_repo_id = urllib.parse.unquote(repo_id)
+    logger.info(f"Adding comment to repository with ID: {decoded_repo_id} (original: {repo_id})")
+
+    repo = await db_get_repository(decoded_repo_id)
+    if not repo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Repository not found"
+        )
+
+    # Check if user has access to this repository
+    if not check_repository_access(repo, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this repository"
+        )
+
+    try:
+        comment_id = await db_add_comment(
+            decoded_repo_id, comment_data.comment, comment_data.author
+        )
+        all_comments = await db_get_comments(decoded_repo_id)
+        new = next((c for c in all_comments if c["id"] == comment_id), None)
+        if not new:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Comment added but not found"
+            )
+        return CommentResponse(**new)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error adding comment for {decoded_repo_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to add comment"
+        )
+
+
+@router.get(
+    "/{repo_id:path}/comments",
+    response_model=List[CommentResponse],
+    summary="Get comments for a repository",
+)
+async def get_repository_comments(
+    repo_id: str,
+    limit: int = Query(20, description="Maximum number of comments to return"),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Get comments for a repository.
+
+    Requires authentication. Users can only access comments for their own repositories unless they are admin.
+
+    Args:
+        repo_id (str): The ID of the repository.
+        limit (int, optional): Maximum number of comments to return. Defaults to 20.
+        current_user: The authenticated user from JWT token.
+
+    Returns:
+        List[CommentResponse]: A list of comments.
+
+    Raises:
+        HTTPException (404): If the repository is not found.
+        HTTPException (500): If comments retrieval fails.
+    """
+    # URL-decode the repository ID to handle URL-encoded slashes
+    import urllib.parse
+    decoded_repo_id = urllib.parse.unquote(repo_id)
+    logger.info(f"Looking up repository for comments with ID: {decoded_repo_id} (original: {repo_id})")
+
+    repo = await db_get_repository(decoded_repo_id)
+    if not repo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Repository not found"
+        )
+
+    # Check if user has access to this repository
+    if not check_repository_access(repo, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this repository"
+        )
+
+    try:
+        comments = await db_get_comments(decoded_repo_id)
+        return [CommentResponse(**c) for c in comments[:limit]]
+    except Exception as e:
+        logger.error(f"Error retrieving comments for {decoded_repo_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get comments"
+        )
+
+
+# GENERAL ROUTE MOVED TO END TO AVOID CATCHING SPECIFIC ROUTES
 @router.get(
     "/{repo_id:path}",
     response_model=RepositoryDetail,
     summary="Get a single repository by ID",
 )
-async def get_repository_detail(repo_id: str):
+async def get_repository_detail(
+    repo_id: str,
+    current_user: dict = Depends(get_current_user)
+):
     """
     Retrieve full repository info, including recent commits, comments, and versions.
 
+    Requires authentication. Users can only access their own repositories unless they are admin.
+
     Args:
         repo_id (str): Unique owner/repo identifier (e.g., "octocat/Hello-World").
+        current_user: The authenticated user from JWT token.
 
     Returns:
         RepositoryDetail: A Pydantic model containing:
@@ -202,6 +444,8 @@ async def get_repository_detail(repo_id: str):
             - versions: list of VersionSchema
 
     Raises:
+        HTTPException (401): If not authenticated.
+        HTTPException (403): If user doesn't have access to this repository.
         HTTPException (404): If repository with `repo_id` does not exist.
     """
     # URL-decode the repository ID to handle URL-encoded slashes
@@ -214,6 +458,13 @@ async def get_repository_detail(repo_id: str):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Repository not found"
+        )
+
+    # Check if user has access to this repository
+    if not check_repository_access(repo_data, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have access to this repository"
         )
 
     # Check if we can connect to GitHub
@@ -247,9 +498,12 @@ async def get_repository_detail(repo_id: str):
         logger.error(f"Error fetching versions for {repo_id}: {versions}")
         versions = []
 
-    # Convert tags from comma-separated string to list
-    if "tags" in repo_data and isinstance(repo_data["tags"], str):
-        repo_data["tags"] = [tag.strip() for tag in repo_data["tags"].split(",")] if repo_data["tags"] else []
+    # Convert tags from comma-separated string to list BEFORE model validation
+    if "tags" in repo_data and isinstance(repo_data["tags"], str) and repo_data["tags"]:
+        repo_data["tags"] = [tag.strip() for tag in repo_data["tags"].split(",")]
+    else:
+        # Handle None, empty string, or missing tags field
+        repo_data["tags"] = []
 
     return RepositoryDetail(
         **repo_data,
@@ -258,212 +512,3 @@ async def get_repository_detail(repo_id: str):
         versions=versions,
     )
 
-
-@router.put(
-    "/{repo_id:path}/metadata",
-    response_model=MessageResponse,
-    summary="Update repository metadata (tags and notes)",
-)
-async def update_repo_metadata(
-    repo_id: str,
-    data: RepoMetadataUpdate = Body(...),
-):
-    """
-    Update the metadata (tags and notes) of a repository.
-
-    Args:
-        repo_id (str): The ID of the repository.
-        data (RepoMetadataUpdate): The new metadata to apply.
-
-    Returns:
-        MessageResponse: A message indicating the result of the update.
-
-    Raises:
-        HTTPException (404): If the repository is not found.
-        HTTPException (500): If the update fails unexpectedly.
-    """
-    # URL-decode the repository ID to handle URL-encoded slashes
-    import urllib.parse
-    decoded_repo_id = urllib.parse.unquote(repo_id)
-    logger.info(f"Updating metadata for repository with ID: {decoded_repo_id} (original: {repo_id})")
-
-    try:
-        success = await db_update_repository_metadata(
-            decoded_repo_id, data.tags, data.notes
-        )
-    except Exception as e:
-        logger.error(f"Error updating metadata for {decoded_repo_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update metadata"
-        )
-
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Repository not found"
-        )
-
-    return MessageResponse(message="Repository metadata updated")
-
-
-@router.post(
-    "/{repo_id:path}/comments",
-    response_model=CommentResponse,
-    summary="Add a comment to a repository",
-)
-async def add_repository_comment(
-    repo_id: str,
-    comment_data: CommentCreate = Body(...),
-):
-    """
-    Add a comment to a repository.
-
-    Args:
-        repo_id (str): The ID of the repository.
-        comment_data (CommentCreate): The comment payload.
-
-    Returns:
-        CommentResponse: The newly created comment.
-
-    Raises:
-        HTTPException (404): If the repository is not found.
-        HTTPException (500): If the comment creation fails.
-    """
-    # URL-decode the repository ID to handle URL-encoded slashes
-    import urllib.parse
-    decoded_repo_id = urllib.parse.unquote(repo_id)
-    logger.info(f"Adding comment to repository with ID: {decoded_repo_id} (original: {repo_id})")
-
-    repo = await db_get_repository(decoded_repo_id)
-    if not repo:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Repository not found"
-        )
-
-    try:
-        comment_id = await db_add_comment(
-            decoded_repo_id, comment_data.comment, comment_data.author
-        )
-        all_comments = await db_get_comments(decoded_repo_id)
-        new = next((c for c in all_comments if c["id"] == comment_id), None)
-        if not new:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Comment added but not found"
-            )
-        return CommentResponse(**new)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error adding comment for {decoded_repo_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to add comment"
-        )
-
-
-@router.get(
-    "/{repo_id:path}/comments",
-    response_model=List[CommentResponse],
-    summary="Get comments for a repository",
-)
-async def get_repository_comments(
-    repo_id: str,
-    limit: int = Query(20, description="Maximum number of comments to return"),
-):
-    """
-    Get comments for a repository.
-
-    Args:
-        repo_id (str): The ID of the repository.
-        limit (int, optional): Maximum number of comments to return. Defaults to 20.
-
-    Returns:
-        List[CommentResponse]: A list of comments.
-
-    Raises:
-        HTTPException (404): If the repository is not found.
-        HTTPException (500): If comments retrieval fails.
-    """
-    # URL-decode the repository ID to handle URL-encoded slashes
-    import urllib.parse
-    decoded_repo_id = urllib.parse.unquote(repo_id)
-    logger.info(f"Looking up repository for comments with ID: {decoded_repo_id} (original: {repo_id})")
-
-    repo = await db_get_repository(decoded_repo_id)
-    if not repo:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Repository not found"
-        )
-
-    try:
-        comments = await db_get_comments(decoded_repo_id)
-        return [CommentResponse(**c) for c in comments[:limit]]
-    except Exception as e:
-        logger.error(f"Error retrieving comments for {decoded_repo_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get comments"
-        )
-
-
-@router.get(
-    "/{repo_id:path}/commits/",
-    response_model=List[CommitSchema],
-    summary="Get recent commits for a repository",
-)
-async def get_repository_commits(
-    repo_id: str,
-    limit: int = Query(10, description="Maximum number of commits to return"),
-):
-    """
-    Get recent commits for a repository.
-
-    Args:
-        repo_id (str): The ID of the repository.
-        limit (int, optional): Maximum number of commits to return. Defaults to 10.
-
-    Returns:
-        List[CommitSchema]: A list of recent commits.
-
-    Raises:
-        HTTPException (404): If the repository is not found.
-        HTTPException (500): If commits retrieval fails.
-    """
-    # URL-decode the repository ID to handle URL-encoded slashes
-    import urllib.parse
-    decoded_repo_id = urllib.parse.unquote(repo_id)
-    logger.info(f"Looking up repository with ID: {decoded_repo_id} (original: {repo_id})")
-
-    repo = await db_get_repository(decoded_repo_id)
-    if not repo:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Repository not found"
-        )
-
-    # Check if we can connect to GitHub
-    offline_mode = False
-    try:
-        # Try to make a quick connection to GitHub to check if we're online
-        import socket
-        socket.create_connection(("api.github.com", 443), timeout=1)
-    except (socket.timeout, socket.error):
-        # If we can't connect, assume we're offline
-        logger.warning("Cannot connect to GitHub - operating in offline mode")
-        offline_mode = True
-
-    gh_client = get_gh_client()
-
-    try:
-        commits = await fetch_recent_commits(gh_client, decoded_repo_id, limit=limit, offline_mode=offline_mode)
-        return commits
-    except Exception as e:
-        logger.error(f"Error retrieving commits for {decoded_repo_id}: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get commits"
-        )

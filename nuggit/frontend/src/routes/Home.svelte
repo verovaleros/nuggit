@@ -1,5 +1,30 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
+  import TagInput from '../components/TagInput.svelte';
+  import ErrorBoundary from '../components/ErrorBoundary.svelte';
+  import Admin from '../components/Admin.svelte';
+  import { apiClient, ApiError } from '../lib/api/apiClient.js';
+  import { authStore } from '../lib/stores/authStore.js';
+  import {
+    formatDateTime,
+    formatRelativeTime,
+    formatDateTimeWithRelative,
+    formatCompactDate,
+    isValidDate
+  } from '../lib/timezone.js';
+
+  // Auth state
+  $: authState = $authStore;
+  $: isAuthenticated = authState.isAuthenticated;
+  $: currentUser = authState.user;
+
+  // Redirect to login if not authenticated
+  $: if (authState.isInitialized && !isAuthenticated) {
+    import('svelte-spa-router').then(({ push }) => {
+      sessionStorage.setItem('nuggit_redirect_after_login', window.location.hash);
+      push('/login');
+    });
+  }
 
   let currentTab = 'repos';
 
@@ -13,6 +38,10 @@
     window.addEventListener('hashchange', parseHashTab);
   });
 
+  onDestroy(() => {
+    window.removeEventListener('hashchange', parseHashTab);
+  });
+
   function switchTab(tab) {
     currentTab = tab;
   }
@@ -24,7 +53,7 @@
   let searchTerm = '';
 
   // Sorting options
-  let sortField = 'last_synced'; // Default sort by last_synced (most recent first)
+  let sortField = 'last_commit'; // Default sort by last_commit (most recent first)
   let sortOrder = 'desc'; // Default sort order is descending
 
   // Repository adding
@@ -33,6 +62,10 @@
   let isAdding = false;
   let addResults = null;
   let processingRepos = [];
+  let sharedTags = ''; // Tags to apply to all repositories in batch
+
+  // Version information for troubleshooting
+  let versionInfo = null;
 
   // Tags and stats
   $: allTags = Array.from(
@@ -58,11 +91,15 @@
   };
 
   onMount(async () => {
+    await loadRepositories();
+    await loadVersionInfo();
+  });
+
+  async function loadRepositories() {
     try {
       console.log('Fetching repositories...');
-      const res = await fetch('http://localhost:8001/repositories/');
-      const data = await res.json();
-      allRepos = data.repositories;
+      const data = await apiClient.getRepositories();
+      allRepos = data.repositories || [];
       console.log('Total repositories loaded:', allRepos.length);
 
       // Initialize filteredRepos with all repositories, properly sorted
@@ -73,8 +110,28 @@
       currentDisplayCount = pageSize;
     } catch (error) {
       console.error('Error loading repositories:', error);
+      if (error instanceof ApiError && error.status === 401) {
+        // Handle authentication error
+        console.log('Authentication required for repository access');
+        allRepos = [];
+        filteredRepos = [];
+      } else {
+        // Handle other errors
+        addStatus = `Error loading repositories: ${error.message}`;
+      }
     }
-  });
+  }
+
+  async function loadVersionInfo() {
+    // Fetch version information for troubleshooting
+    try {
+      const versionRes = await fetch('http://localhost:8001/version');
+      versionInfo = await versionRes.json();
+    } catch (error) {
+      console.error('Error loading version info:', error);
+      versionInfo = { api_version: 'unknown', git_commit: 'unknown', app_name: 'Nuggit' };
+    }
+  }
 
   function goToDetail(id) {
     const encodedId = btoa(id);
@@ -139,10 +196,12 @@
     console.log(`Now showing up to ${currentDisplayCount} repositories`);
   }
 
-  // Reactive statement to handle search term changes
-  $: if (searchTerm !== undefined) {
-    console.log('Search term changed to:', searchTerm);
-    // Reset to show only the first page when search changes
+  // Combined reactive statement to handle search and sort changes
+  // This prevents race conditions between multiple reactive statements
+  $: if (allRepos && searchTerm !== undefined && sortField && sortOrder) {
+    console.log('Updating filtered repositories - search:', searchTerm, 'sort:', sortField, sortOrder);
+
+    // Reset to show only the first page when search or sort changes
     currentDisplayCount = pageSize;
 
     // Filter and sort repositories
@@ -150,12 +209,6 @@
     filteredRepos = sortRepositories(filtered);
 
     console.log(`Showing ${filteredRepos.length} repositories, sorted by ${sortField} (${sortOrder})`);
-  }
-
-  // Reactive statement to handle sort changes
-  $: if (sortField && sortOrder) {
-    console.log(`Sort changed to: ${sortField} (${sortOrder})`);
-    filteredRepos = sortRepositories(allRepos.filter(matchesSearch));
   }
 
   // This reactive statement has been moved above
@@ -193,52 +246,12 @@
   }
 
   function formatDate(dateString) {
-    if (!dateString) return 'N/A';
-
-    try {
-      const date = new Date(dateString);
-
-      // Check if the date is valid
-      if (isNaN(date.getTime())) return 'Invalid date';
-
-      // Format the date as a readable string
-      return date.toLocaleString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      });
-    } catch (error) {
-      console.error('Error formatting date:', error);
-      return dateString; // Return the original string if there's an error
-    }
+    return formatDateTime(dateString, { includeTime: true, includeTimezone: false });
   }
 
-  // Format date with days ago
+  // Format date with relative time
   function formatDateWithDaysAgo(dateString) {
-    if (!dateString) return 'N/A';
-
-    try {
-      const date = new Date(dateString);
-
-      // Check if date is valid
-      if (isNaN(date.getTime())) return dateString;
-
-      // Format the date
-      const formattedDate = formatDate(dateString);
-
-      // Calculate days ago
-      const now = new Date();
-      const diffTime = Math.abs(now - date);
-      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-
-      // Return formatted string
-      return `${formattedDate} (${diffDays} ${diffDays === 1 ? 'day' : 'days'} ago)`;
-    } catch (error) {
-      console.error('Error formatting date with days ago:', error);
-      return dateString;
-    }
+    return formatDateTimeWithRelative(dateString, { includeTime: true, includeTimezone: false });
   }
 
   // Helper function to determine if a string is a GitHub URL
@@ -276,61 +289,7 @@
 
         // First try the single repository endpoint
         try {
-          const singleRes = await fetch('http://localhost:8001/repositories/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-          });
-
-          if (singleRes.ok) {
-            const data = await singleRes.json();
-
-            // Update the processing status for this repository
-            processingRepos = processingRepos.map((repo, index) =>
-              index === i
-                ? {
-                    ...repo,
-                    status: 'success',
-                    message: '✅',
-                    name: data.repository.name,
-                    id: data.repository.id
-                  }
-                : repo
-            );
-
-            // Add to successful results
-            results.successful.push({
-              id: data.repository.id,
-              name: data.repository.name
-            });
-
-            continue; // Skip to the next repository
-          }
-
-          // If single endpoint fails, fall back to batch endpoint
-          console.log(`Single endpoint failed for ${repoInput}, trying batch endpoint`);
-        } catch (singleErr) {
-          console.error(`Error with single endpoint for ${repoInput}:`, singleErr);
-          // Continue to batch endpoint
-        }
-
-        // Fall back to the batch endpoint
-        const batchRes = await fetch('http://localhost:8001/repositories/batch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ repositories: [repoInput] })
-        });
-
-        if (!batchRes.ok) {
-          const errText = await batchRes.text();
-          throw new Error(errText);
-        }
-
-        const batchData = await batchRes.json();
-
-        // Check if the repository was added successfully
-        if (batchData.results.successful.length > 0) {
-          const successfulRepo = batchData.results.successful[0];
+          const data = await apiClient.addRepository(payload);
 
           // Update the processing status for this repository
           processingRepos = processingRepos.map((repo, index) =>
@@ -339,22 +298,59 @@
                   ...repo,
                   status: 'success',
                   message: '✅',
-                  name: successfulRepo.name,
-                  id: successfulRepo.id // Update with the canonical ID
+                  name: data.repository.name,
+                  id: data.repository.id
                 }
               : repo
           );
 
           // Add to successful results
           results.successful.push({
-            id: successfulRepo.id,
-            name: successfulRepo.name
+            id: data.repository.id,
+            name: data.repository.name
           });
-        } else if (batchData.results.failed.length > 0) {
-          const failedRepo = batchData.results.failed[0];
-          throw new Error(failedRepo.error);
-        } else {
-          throw new Error("Unknown error occurred");
+
+          continue; // Skip to the next repository
+        } catch (singleErr) {
+          console.error(`Error with single endpoint for ${repoInput}:`, singleErr);
+          // Continue to batch endpoint
+        }
+
+        // Fall back to the batch endpoint
+        try {
+          const batchData = await apiClient.batchImportRepositories({ repositories: [repoInput] });
+
+          // Check if the repository was added successfully
+          if (batchData.results.successful.length > 0) {
+            const successfulRepo = batchData.results.successful[0];
+
+            // Update the processing status for this repository
+            processingRepos = processingRepos.map((repo, index) =>
+              index === i
+                ? {
+                    ...repo,
+                    status: 'success',
+                    message: '✅',
+                    name: successfulRepo.name,
+                    id: successfulRepo.id // Update with the canonical ID
+                  }
+                : repo
+            );
+
+            // Add to successful results
+            results.successful.push({
+              id: successfulRepo.id,
+              name: successfulRepo.name
+            });
+          } else if (batchData.results.failed.length > 0) {
+            const failedRepo = batchData.results.failed[0];
+            throw new Error(failedRepo.error);
+          } else {
+            throw new Error("Unknown error occurred");
+          }
+        } catch (batchErr) {
+          console.error(`Error with batch endpoint for ${repoInput}:`, batchErr);
+          throw batchErr;
         }
 
       } catch (err) {
@@ -371,6 +367,147 @@
         results.failed.push({
           id: repoInput,
           error: err.message
+        });
+      }
+    }
+
+    return results;
+  }
+
+  // Helper function to process repositories using batch endpoint with shared tags
+  async function processBatchWithTags(repos, tags) {
+    const results = { successful: [], failed: [] };
+
+    // Update all repos to processing status
+    processingRepos = processingRepos.map(repo => ({
+      ...repo,
+      status: 'processing',
+      message: '🔄'
+    }));
+
+    try {
+      // Try batch endpoint first
+      const batchData = await apiClient.batchImportRepositories({
+        repositories: repos,
+        tags: tags
+      });
+
+      if (batchData && batchData.results) {
+        // Update processing status based on results
+        processingRepos = processingRepos.map((repo, index) => {
+          const successful = batchData.results.successful.find(s => s.id === repo.id || repos[index] === repo.id);
+          const failed = batchData.results.failed.find(f => f.id === repo.id || repos[index] === repo.id);
+
+          if (successful) {
+            return {
+              ...repo,
+              status: 'success',
+              message: '✅',
+              name: successful.name || repo.id
+            };
+          } else if (failed) {
+            return {
+              ...repo,
+              status: 'error',
+              message: '❌',
+              errorDetails: failed.error
+            };
+          } else {
+            return repo;
+          }
+        });
+
+        return batchData.results;
+      } else {
+        // If batch endpoint fails, fall back to individual processing with tag application
+        console.log('Batch endpoint failed, falling back to individual processing with tags');
+        return await processRepositoriesWithTags(repos, tags);
+      }
+    } catch (error) {
+      console.log('Batch endpoint error, falling back to individual processing with tags:', error);
+      return await processRepositoriesWithTags(repos, tags);
+    }
+  }
+
+  // Helper function to process repositories individually and then apply tags
+  async function processRepositoriesWithTags(repos, tags) {
+    const results = { successful: [], failed: [] };
+
+    for (let i = 0; i < repos.length; i++) {
+      const repoInput = repos[i];
+
+      // Update the status to show we're processing this repository
+      processingRepos = processingRepos.map((repo, index) =>
+        index === i
+          ? { ...repo, status: 'processing', message: '🔄' }
+          : repo
+      );
+
+      try {
+        // Determine if this is a URL or username/repo format
+        const isUrl = isGitHubUrl(repoInput);
+
+        // Prepare the request payload
+        let payload;
+        if (isUrl) {
+          payload = { url: repoInput };
+        } else {
+          payload = { id: repoInput };
+        }
+
+        console.log(`Processing repository: ${repoInput} (${isUrl ? 'URL' : 'ID'})`);
+
+        // Add the repository first
+        const data = await apiClient.addRepository(payload);
+        const repoId = data.repository.id;
+
+        // Now apply the tags if provided
+        if (tags) {
+          try {
+            await apiClient.updateRepositoryMetadata(repoId, {
+              tags: tags,
+              notes: data.repository.notes || ''
+            });
+          } catch (tagError) {
+            console.warn(`Error applying tags to ${repoId}:`, tagError);
+          }
+        }
+
+        // Update the processing status for this repository
+        processingRepos = processingRepos.map((repo, index) =>
+          index === i
+            ? {
+                ...repo,
+                status: 'success',
+                message: '✅',
+                name: data.repository.name,
+                id: data.repository.id
+              }
+            : repo
+        );
+
+        // Add to successful results
+        results.successful.push({
+          id: data.repository.id,
+          name: data.repository.name
+        });
+      } catch (error) {
+        // Update the processing status for this repository
+        processingRepos = processingRepos.map((repo, index) =>
+          index === i
+            ? {
+                ...repo,
+                status: 'error',
+                message: '❌',
+                errorDetails: error.message
+              }
+            : repo
+        );
+
+        // Add to failed results
+        results.failed.push({
+          id: repoInput,
+          error: error.message
         });
       }
     }
@@ -415,8 +552,15 @@
       // Update UI to show we're starting
       addStatus = `Processing ${repos.length} repositories...`;
 
-      // Process repositories one by one with progressive feedback
-      const results = await processRepositories(repos);
+      let results;
+
+      // If shared tags are provided, use the batch endpoint directly
+      if (sharedTags.trim()) {
+        results = await processBatchWithTags(repos, sharedTags.trim());
+      } else {
+        // Process repositories one by one with progressive feedback
+        results = await processRepositories(repos);
+      }
 
       // Create a results object similar to what the batch API returns
       addResults = {
@@ -426,16 +570,14 @@
 
       addStatus = addResults.message;
 
-      // If all repositories were added successfully, clear the input
+      // If all repositories were added successfully, clear the inputs
       if (results.failed.length === 0) {
         repoIds = '';
+        sharedTags = '';
       }
 
       // Refresh the repository list
-      const reposData = await fetch('http://localhost:8001/repositories/').then(r => r.json());
-      allRepos = reposData.repositories;
-      // Update filteredRepos based on current search term and sort settings
-      filteredRepos = sortRepositories(allRepos.filter(matchesSearch));
+      await loadRepositories();
 
       // If it was a single repository and it was added successfully, redirect to its detail page
       if (isSingleRepo && results.successful.length > 0) {
@@ -465,6 +607,74 @@
     max-width: 960px;
     margin: 2rem auto;
     font-family: sans-serif;
+  }
+
+  /* Authentication Message Styles */
+  .auth-message {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 60vh;
+  }
+
+  .auth-card {
+    background: white;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+    padding: 3rem;
+    text-align: center;
+    max-width: 400px;
+    width: 100%;
+  }
+
+  .auth-card h2 {
+    color: #333;
+    margin-bottom: 1rem;
+    font-size: 1.5rem;
+  }
+
+  .auth-card p {
+    color: #666;
+    margin-bottom: 2rem;
+    line-height: 1.6;
+  }
+
+  .auth-actions {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
+  }
+
+  .btn {
+    padding: 0.75rem 1.5rem;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.9rem;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    border: none;
+  }
+
+  .btn-primary {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+  }
+
+  .btn-primary:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+  }
+
+  .btn-outline {
+    background: transparent;
+    color: #667eea;
+    border: 2px solid #667eea;
+  }
+
+  .btn-outline:hover {
+    background: #667eea;
+    color: white;
   }
 
   h1 {
@@ -537,11 +747,14 @@
   th {
     background-color: #1f2937;
     color: white;
-    padding: 1rem;
+    padding: 1rem 2.5rem 1rem 1rem; /* Extra right padding for sort indicator */
     text-align: left;
     cursor: pointer;
     user-select: none;
     position: relative;
+    height: 3.5rem; /* Fixed height to prevent aspect ratio changes */
+    box-sizing: border-box;
+    vertical-align: middle;
   }
 
   th:hover {
@@ -558,6 +771,7 @@
     height: 0;
     border-left: 5px solid transparent;
     border-right: 5px solid transparent;
+    z-index: 1;
   }
 
   th.sorted.asc:after {
@@ -667,6 +881,20 @@
     resize: vertical;
   }
 
+  .shared-tags-section {
+    margin-top: 1rem;
+    max-width: 500px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .shared-tags-section label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    color: #374151;
+  }
+
   .batch-results {
     margin-top: 1.5rem;
     text-align: left;
@@ -675,9 +903,7 @@
     margin-right: auto;
   }
 
-  .batch-results h3 {
-    margin-bottom: 0.5rem;
-  }
+
 
   .success-list, .failed-list {
     margin-top: 0.5rem;
@@ -801,17 +1027,72 @@
     from { opacity: 0; }
     to { opacity: 1; }
   }
+
+  /* Version Footer Styles */
+  .version-footer {
+    margin-top: 3rem;
+    padding: 1rem 0;
+    border-top: 1px solid #e5e7eb;
+    text-align: center;
+  }
+
+  .version-info {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: #6b7280;
+  }
+
+  .app-name {
+    font-weight: 600;
+    color: #374151;
+  }
+
+  .version-details {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    background-color: #f3f4f6;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+  }
+
+  @media (max-width: 768px) {
+    .version-info {
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+  }
 </style>
 
-<div class="container">
-  <h1>🧠 Nuggit Dashboard</h1>
+<ErrorBoundary>
+  <div class="container">
+    <h1>🧠 Nuggit Dashboard</h1>
 
-  <nav class="tabs">
-    <button class:active={currentTab === 'repos'} on:click={() => switchTab('repos')}>🧠 Repos</button>
-    <button class:active={currentTab === 'tags'} on:click={() => switchTab('tags')}>🏷️ Tags</button>
-    <button class:active={currentTab === 'stats'} on:click={() => switchTab('stats')}>📊 Stats</button>
-    <button class:active={currentTab === 'add'} on:click={() => switchTab('add')}>➕ Add Repo</button>
-  </nav>
+    {#if !isAuthenticated}
+      <!-- Unauthenticated User Message -->
+      <div class="auth-message">
+        <div class="auth-card">
+          <h2>🔐 Authentication Required</h2>
+          <p>Please sign in to access your repositories and manage your data.</p>
+          <div class="auth-actions">
+            <a href="#/login" class="btn btn-primary">Sign In</a>
+            <a href="#/register" class="btn btn-outline">Create Account</a>
+          </div>
+        </div>
+      </div>
+    {:else}
+      <!-- Authenticated User Interface -->
+      <nav class="tabs">
+        <button class:active={currentTab === 'repos'} on:click={() => switchTab('repos')}>🧠 Repos</button>
+        <button class:active={currentTab === 'tags'} on:click={() => switchTab('tags')}>🏷️ Tags</button>
+        <button class:active={currentTab === 'stats'} on:click={() => switchTab('stats')}>📊 Stats</button>
+        <button class:active={currentTab === 'add'} on:click={() => switchTab('add')}>➕ Add Repo</button>
+        {#if currentUser?.is_admin}
+          <button class:active={currentTab === 'admin'} on:click={() => switchTab('admin')}>🔧 Admin</button>
+        {/if}
+      </nav>
 
   {#if currentTab === 'repos'}
     <div class="search-bar">
@@ -837,7 +1118,8 @@
               <th class={sortField === 'description' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('description')}>Description</th>
               <th class={sortField === 'license' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('license')}>License</th>
               <th class={sortField === 'stars' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('stars')}>Stars</th>
-              <th class={sortField === 'last_synced' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('last_synced')}>Updated</th>
+              <th class={sortField === 'last_commit' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('last_commit')}>Last Commit</th>
+              <th class={sortField === 'last_synced' ? `sorted ${sortOrder}` : ''} on:click={() => changeSort('last_synced')}>Last Updated</th>
             </tr>
           </thead>
           <tbody>
@@ -847,6 +1129,7 @@
                 <td>{repo.description}</td>
                 <td>{repo.license}</td>
                 <td>{repo.stars}</td>
+                <td>{formatDateWithDaysAgo(repo.last_commit)}</td>
                 <td>{formatDateWithDaysAgo(repo.last_synced)}</td>
               </tr>
             {/each}
@@ -905,6 +1188,13 @@ https://github.com/username2/repo2
 username3/repo3"
           bind:value={repoIds}
         ></textarea>
+
+        <!-- Shared Tags Section -->
+        <div class="shared-tags-section">
+          <label for="shared-tags">Tags to apply to all repositories (optional):</label>
+          <TagInput bind:tags={sharedTags} />
+        </div>
+
         <div style="margin-top: 1rem;">
           <button class="add-repo-button" on:click={addRepositories} disabled={isAdding}>
             {isAdding ? 'Adding...' : 'Add Repositories'}
@@ -953,5 +1243,25 @@ username3/repo3"
         {/if}
       </div>
     </div>
+
+      {:else if currentTab === 'admin'}
+        <Admin />
+      {/if}
+    {/if}
+
+    <!-- Version Footer for Troubleshooting -->
+    {#if versionInfo}
+    <footer class="version-footer">
+      <div class="version-info">
+        <span class="app-name">{versionInfo.app_name}</span>
+        <span class="version-details">
+          v{versionInfo.api_version}
+          {#if versionInfo.git_commit !== 'unknown'}
+            • {versionInfo.git_commit}
+          {/if}
+        </span>
+      </div>
+    </footer>
   {/if}
-</div>
+  </div>
+</ErrorBoundary>
