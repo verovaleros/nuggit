@@ -22,15 +22,29 @@
    */
   onMount(async () => {
     try {
-      // Get token from URL parameters
-      const urlParams = new URLSearchParams(window.location.hash.split('?')[1]);
-      const token = urlParams.get('token');
+      // Get token from URL parameters - try both query params and hash params
+      let token = null;
 
-      if (!token) {
-        throw new Error('Verification token not found in URL');
+      // First try standard query parameters (e.g., /verify-email?token=abc123)
+      const searchParams = new URLSearchParams(window.location.search);
+      token = searchParams.get('token');
+
+      // Fallback to hash-based parameters (e.g., /#/verify-email?token=abc123)
+      if (!token && window.location.hash.includes('?')) {
+        const hashParams = new URLSearchParams(window.location.hash.split('?')[1]);
+        token = hashParams.get('token');
       }
 
-      console.log('Verifying email with token:', token);
+      if (!token) {
+        throw new Error('Verification token not found in URL. Please check that you clicked the correct link from your email.');
+      }
+
+      // Validate token format (basic check)
+      if (token.length < 10) {
+        throw new Error('Invalid verification token format. Please use the link from your email.');
+      }
+
+      console.log('Verifying email with token:', token.substring(0, 8) + '...');
 
       // Call verification API
       const response = await apiClient.post('/auth/verify-email', {
@@ -51,11 +65,29 @@
 
     } catch (err) {
       console.error('Email verification error:', err);
-      
+
       if (err instanceof ApiError) {
-        error = err.message;
+        // Handle specific API errors
+        if (err.status === 400) {
+          error = 'Invalid or expired verification token. Please request a new verification email.';
+        } else if (err.status === 404) {
+          error = 'Verification token not found. The link may have expired or already been used.';
+        } else if (err.status >= 500) {
+          error = 'Server error occurred. Please try again later or contact support.';
+        } else {
+          error = err.message || 'Email verification failed. Please try again.';
+        }
       } else {
-        error = err.message || 'An unexpected error occurred during email verification';
+        // Handle client-side errors (token parsing, network issues, etc.)
+        if (err.message.includes('token not found')) {
+          error = 'No verification token found in the URL. Please make sure you clicked the correct link from your email.';
+        } else if (err.message.includes('Invalid verification token format')) {
+          error = err.message;
+        } else if (err.name === 'TypeError' || err.message.includes('fetch')) {
+          error = 'Network error. Please check your internet connection and try again.';
+        } else {
+          error = err.message || 'An unexpected error occurred during email verification. Please try again.';
+        }
       }
     } finally {
       loading = false;
@@ -111,9 +143,17 @@
           <div class="help-text">
             <p>This could happen if:</p>
             <ul>
-              <li>The verification link has expired</li>
+              <li>The verification link has expired (links expire after 24 hours)</li>
               <li>The verification link has already been used</li>
-              <li>The verification link is invalid</li>
+              <li>The verification link is invalid or incomplete</li>
+              <li>You didn't click the link directly from your email</li>
+              <li>There was a network error during verification</li>
+            </ul>
+            <p><strong>What to do:</strong></p>
+            <ul>
+              <li>Try clicking the verification link in your email again</li>
+              <li>Check your spam/junk folder for the verification email</li>
+              <li>If the link has expired, register again to get a new verification email</li>
             </ul>
           </div>
           
