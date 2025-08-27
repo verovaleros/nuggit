@@ -16,6 +16,9 @@ from nuggit.util.timezone import validate_datetime_string, parse_datetime, to_ut
 
 logger = logging.getLogger(__name__)
 
+# Configuration constants
+MAX_COMMA_SEPARATED_ITEMS = 50  # Maximum number of items in comma-separated lists (topics, tags)
+
 
 class ValidationError(Exception):
     """Raised when data validation fails."""
@@ -91,7 +94,7 @@ class RepositoryModel(BaseModel):
         
         # Check for reasonable number of items
         items = [item.strip() for item in v.split(',') if item.strip()]
-        if len(items) > 50:  # Reasonable limit
+        if len(items) > MAX_COMMA_SEPARATED_ITEMS:  # Reasonable limit
             raise ValueError('Too many items in comma-separated list')
         
         return v
