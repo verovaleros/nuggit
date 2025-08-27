@@ -3,6 +3,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # Set the API URL for frontend - update this for your production domain
+        VITE_API_BASE_URL: "https://your-production-domain.com/api"
     ports:
       - "8001:8001"  # Backend port
       - "5173:5173"  # Frontend port

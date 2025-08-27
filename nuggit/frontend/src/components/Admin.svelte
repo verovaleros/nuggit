@@ -1,6 +1,7 @@
 <script>
   import { formatDateTime, formatRelativeTime } from '../lib/timezone.js';
-  
+  import { apiClient } from '../lib/api/apiClient.js';
+
   let backups = [];
   let isCreatingBackup = false;
   let backupStatus = '';
@@ -9,8 +10,7 @@
   async function loadBackups() {
     isLoadingBackups = true;
     try {
-      const response = await fetch('http://localhost:8001/health/health/backups');
-      const data = await response.json();
+      const data = await apiClient.request('/health/health/backups');
       backups = data.backups || [];
       console.log('Loaded backups:', backups);
     } catch (error) {
@@ -24,21 +24,14 @@
   async function createBackup() {
     isCreatingBackup = true;
     backupStatus = 'Creating backup...';
-    
+
     try {
-      const response = await fetch('http://localhost:8001/health/health/backup', {
+      const data = await apiClient.request('/health/health/backup', {
         method: 'POST'
       });
-      
-      if (response.ok) {
-        const data = await response.json();
-        backupStatus = `✅ Backup created successfully: ${data.backup_path}`;
-        // Reload backups list
-        await loadBackups();
-      } else {
-        const error = await response.json();
-        backupStatus = `❌ Backup failed: ${error.detail || 'Unknown error'}`;
-      }
+      backupStatus = `✅ Backup created successfully: ${data.backup_path}`;
+      // Reload backups list
+      await loadBackups();
     } catch (error) {
       console.error('Error creating backup:', error);
       backupStatus = `❌ Backup failed: ${error.message}`;
@@ -50,21 +43,14 @@
   async function createAutoBackup() {
     isCreatingBackup = true;
     backupStatus = 'Creating automatic backup...';
-    
+
     try {
-      const response = await fetch('http://localhost:8001/health/health/backup/auto', {
+      const data = await apiClient.request('/health/health/backup/auto', {
         method: 'POST'
       });
-      
-      if (response.ok) {
-        const data = await response.json();
-        backupStatus = `✅ Auto backup created successfully: ${data.backup_path}`;
-        // Reload backups list
-        await loadBackups();
-      } else {
-        const error = await response.json();
-        backupStatus = `❌ Auto backup failed: ${error.detail || 'Unknown error'}`;
-      }
+      backupStatus = `✅ Auto backup created successfully: ${data.backup_path}`;
+      // Reload backups list
+      await loadBackups();
     } catch (error) {
       console.error('Error creating auto backup:', error);
       backupStatus = `❌ Auto backup failed: ${error.message}`;

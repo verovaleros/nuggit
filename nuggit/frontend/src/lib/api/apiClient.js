@@ -11,7 +11,7 @@ import { push } from 'svelte-spa-router';
 
 // API configuration
 const API_CONFIG = {
-  BASE_URL: 'http://localhost:8001',
+  BASE_URL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001',
   TIMEOUT: 30000, // 30 seconds
   RETRY_ATTEMPTS: 3,
   RETRY_DELAY: 1000 // 1 second

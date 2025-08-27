@@ -125,8 +125,8 @@
   async function loadVersionInfo() {
     // Fetch version information for troubleshooting
     try {
-      const versionRes = await fetch('http://localhost:8001/version');
-      versionInfo = await versionRes.json();
+      const versionRes = await apiClient.request('/version');
+      versionInfo = versionRes;
     } catch (error) {
       console.error('Error loading version info:', error);
       versionInfo = { api_version: 'unknown', git_commit: 'unknown', app_name: 'Nuggit' };

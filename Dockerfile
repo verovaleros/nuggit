@@ -29,6 +29,10 @@ COPY nuggit/frontend/ /app/frontend/
 WORKDIR /app/frontend
 RUN npm install
 
+# Set default API URL for production (can be overridden with build args)
+ARG VITE_API_BASE_URL=http://localhost:8001
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+
 # Go back to app directory
 WORKDIR /app
 

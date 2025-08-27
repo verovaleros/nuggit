@@ -128,15 +128,9 @@
 
         // Fetch versions using the new API endpoint
         try {
-          const versionsRes = await fetch(`http://localhost:8001/api/get-versions?repo_id=${encodedRepoId}`);
-
-          if (versionsRes.ok) {
-            const versions = await versionsRes.json();
-            repo.versions = versions;
-            console.log('Versions fetched successfully:', versions);
-          } else {
-            console.error('Failed to fetch versions:', await versionsRes.text());
-          }
+          const versions = await apiClient.request(`/api/get-versions?repo_id=${encodedRepoId}`);
+          repo.versions = versions;
+          console.log('Versions fetched successfully:', versions);
         } catch (versionsErr) {
           console.error('Error fetching versions:', versionsErr);
         }
@@ -463,14 +457,8 @@
       const encodedRepoId = encodeURIComponent(repoId);
 
       // Use the new API endpoint that works with query parameters
-      console.log(`Using API endpoint: http://localhost:8001/api/compare-versions?repo_id=${encodedRepoId}&version1_id=${selectedVersion1}&version2_id=${selectedVersion2}`);
-      const queryRes = await fetch(`http://localhost:8001/api/compare-versions?repo_id=${encodedRepoId}&version1_id=${selectedVersion1}&version2_id=${selectedVersion2}`);
-
-      if (!queryRes.ok) {
-        throw new Error(await queryRes.text());
-      }
-
-      comparisonResult = await queryRes.json();
+      console.log(`Comparing versions for ${repoId}: version ${selectedVersion1} vs ${selectedVersion2}`);
+      comparisonResult = await apiClient.request(`/api/compare-versions?repo_id=${encodedRepoId}&version1_id=${selectedVersion1}&version2_id=${selectedVersion2}`);
       console.log('Version comparison succeeded:', comparisonResult);
     } catch (err) {
       console.error(err);
