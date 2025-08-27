@@ -6,7 +6,7 @@ email verification, and password reset functionality.
 """
 
 import logging
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, status, Query
