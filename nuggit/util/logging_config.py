@@ -10,6 +10,7 @@ import sys
 import json
 import logging
 import logging.handlers
+import time
 import uuid
 from pathlib import Path
 from typing import Dict, Any, Optional, Union
@@ -109,9 +110,9 @@ class PerformanceLogger:
     
     def start_timer(self, operation: str) -> str:
         """Start timing an operation."""
-        timer_id = f"{operation}_{threading.get_ident()}_{datetime.now().timestamp()}"
+        timer_id = f"{operation}_{threading.get_ident()}_{time.time()}"
         with self._lock:
-            self._timers[timer_id] = datetime.now().timestamp()
+            self._timers[timer_id] = time.time()
         return timer_id
     
     def end_timer(self, timer_id: str, operation: str, **kwargs):
@@ -120,7 +121,7 @@ class PerformanceLogger:
             start_time = self._timers.pop(timer_id, None)
         
         if start_time:
-            duration = datetime.now().timestamp() - start_time
+            duration = time.time() - start_time
             self.logger.info(
                 f"Performance metric: {operation}",
                 extra={
@@ -324,14 +325,14 @@ class LogTimer:
         if isinstance(self.logger, PerformanceLogger):
             self.timer_id = self.logger.start_timer(self.operation)
         else:
-            self.start_time = datetime.now().timestamp()
+            self.start_time = time.time()
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         if isinstance(self.logger, PerformanceLogger) and self.timer_id:
             self.logger.end_timer(self.timer_id, self.operation, **self.kwargs)
         else:
-            duration = datetime.now().timestamp() - self.start_time
+            duration = time.time() - self.start_time
             self.logger.info(
                 f"Operation '{self.operation}' completed in {duration:.4f}s",
                 extra={"operation": self.operation, "duration_seconds": duration, **self.kwargs}
@@ -379,7 +380,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             "request_id": f"req_{uuid.uuid4()}"
         }
 
-        start_time = datetime.now().timestamp()
+        start_time = time.time()
 
         # Log request start
         self.logger.info(
@@ -417,7 +418,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
             raise
         finally:
             # Log request completion
-            duration = datetime.now().timestamp() - start_time
+            duration = time.time() - start_time
 
             log_level = logging.INFO
             if response_info["status_code"] and response_info["status_code"] >= 400:
