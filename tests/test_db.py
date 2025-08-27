@@ -25,8 +25,10 @@ class TestDatabase(unittest.TestCase):
 
     def setUp(self):
         """Set up a temporary database for testing."""
-        # Create a temporary file for the test database
-        self.temp_db_fd, self.temp_db_path = tempfile.mkstemp()
+        # Create a temporary file for the test database using NamedTemporaryFile for better resource management
+        tmpfile = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+        self.temp_db_path = tmpfile.name
+        tmpfile.close()
 
         # Close any existing connection pool to ensure clean state
         from nuggit.util.connection_pool import close_connection_pool
@@ -89,8 +91,7 @@ class TestDatabase(unittest.TestCase):
         from nuggit.util.connection_pool import close_connection_pool
         close_connection_pool()
 
-        # Close and remove the temporary database
-        os.close(self.temp_db_fd)
+        # Remove the temporary database
         os.unlink(self.temp_db_path)
 
     def test_initialize_database(self):

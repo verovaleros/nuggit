@@ -26,9 +26,10 @@ from nuggit.util.auth import create_access_token
 @pytest.fixture
 def temp_db():
     """Create a temporary database for integration testing."""
-    # Create temporary file
-    db_fd, db_path = tempfile.mkstemp(suffix='.db')
-    os.close(db_fd)
+    # Create temporary file using NamedTemporaryFile for better resource management
+    tmpfile = tempfile.NamedTemporaryFile(suffix='.db', delete=False)
+    db_path = tmpfile.name
+    tmpfile.close()
     
     # Initialize database with schema
     conn = sqlite3.connect(db_path)
