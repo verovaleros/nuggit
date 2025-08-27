@@ -276,29 +276,51 @@ async def refresh_token(refresh_data: TokenRefreshRequest):
 async def verify_email(verification_data: EmailVerificationRequest):
     """
     Verify user email address using verification token.
-    
+
     Validates the email verification token and marks the user's email as verified.
     """
     try:
+        logger.info(f"Email verification attempt with token: {verification_data.token[:20]}...")
+
         # Verify token
         user_id = verify_email_verification_token(verification_data.token)
         if not user_id:
+            logger.warning(f"Invalid or expired verification token: {verification_data.token[:20]}...")
             raise validation_error("Invalid or expired verification token")
-        
+
+        logger.info(f"Token verified successfully for user ID: {user_id}")
+
+        # Get user info before verification for logging
+        user_before = get_user_by_id(user_id)
+        if user_before:
+            logger.info(f"User before verification - ID: {user_id}, Email: {user_before['email']}, Verified: {user_before['is_verified']}")
+
         # Mark email as verified
-        if verify_user_email(user_id):
-            logger.info(f"Email verified for user ID: {user_id}")
+        verification_success = verify_user_email(user_id)
+        if verification_success:
+            # Get user info after verification to confirm
+            user_after = get_user_by_id(user_id)
+            if user_after:
+                logger.info(f"User after verification - ID: {user_id}, Email: {user_after['email']}, Verified: {user_after['is_verified']}")
+
+                if user_after['is_verified']:
+                    logger.info(f"Email verification completed successfully for user ID: {user_id} ({user_after['email']})")
+                else:
+                    logger.error(f"Email verification failed - user still not verified: {user_id} ({user_after['email']})")
+                    raise internal_server_error("Email verification failed - user status not updated")
+
             return AuthResponse(
                 success=True,
                 message="Email verified successfully. You can now log in."
             )
         else:
+            logger.error(f"verify_user_email returned False for user ID: {user_id}")
             raise not_found_error("User not found")
-            
+
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Email verification failed: {e}")
+        logger.error(f"Email verification failed with exception: {e}", exc_info=True)
         raise internal_server_error("Email verification failed")
 
 

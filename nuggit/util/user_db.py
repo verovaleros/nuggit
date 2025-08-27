@@ -216,24 +216,58 @@ def update_last_login(user_id: int) -> None:
 def verify_user_email(user_id: int) -> bool:
     """
     Mark user's email as verified.
-    
+
     Args:
         user_id: User ID
-        
+
     Returns:
         bool: True if user was found and updated, False otherwise
     """
     now = utc_now_iso()
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE users SET is_verified = ?, updated_at = ? WHERE id = ?",
-            (True, now, user_id)
-        )
-        
-        if cursor.rowcount > 0:
-            logger.info(f"Verified email for user ID: {user_id}")
-            return True
+
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+
+            # First check if user exists and get current status
+            cursor.execute(
+                "SELECT id, email, username, is_verified FROM users WHERE id = ?",
+                (user_id,)
+            )
+            user = cursor.fetchone()
+
+            if not user:
+                logger.error(f"Cannot verify email - user not found: {user_id}")
+                return False
+
+            logger.info(f"Verifying email for user: {user['email']} (ID: {user_id}, currently verified: {user['is_verified']})")
+
+            # Update verification status
+            cursor.execute(
+                "UPDATE users SET is_verified = ?, updated_at = ? WHERE id = ?",
+                (True, now, user_id)
+            )
+
+            if cursor.rowcount > 0:
+                # Verify the update was successful
+                cursor.execute(
+                    "SELECT is_verified FROM users WHERE id = ?",
+                    (user_id,)
+                )
+                updated_user = cursor.fetchone()
+
+                if updated_user and updated_user['is_verified']:
+                    logger.info(f"Successfully verified email for user: {user['email']} (ID: {user_id})")
+                    return True
+                else:
+                    logger.error(f"Email verification update failed - user still not verified: {user['email']} (ID: {user_id})")
+                    return False
+            else:
+                logger.error(f"Email verification update affected 0 rows for user ID: {user_id}")
+                return False
+
+    except Exception as e:
+        logger.error(f"Exception during email verification for user ID {user_id}: {e}", exc_info=True)
         return False
 
 
