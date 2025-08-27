@@ -27,6 +27,20 @@ from nuggit.api.utils.error_handling import (
 )
 from nuggit.api.routes.auth import get_current_user, require_auth
 
+# HTTP Status Code Constants
+HTTP_STATUS_BAD_REQUEST = 400
+HTTP_STATUS_UNAUTHORIZED = 401
+HTTP_STATUS_FORBIDDEN = 403
+HTTP_STATUS_NOT_FOUND = 404
+HTTP_STATUS_TOO_MANY_REQUESTS = 429
+HTTP_STATUS_INTERNAL_SERVER_ERROR = 500
+
+# API Configuration Constants
+DEFAULT_MAX_RETRIES = 3
+RATE_LIMIT_MAX_WAIT_SECONDS = 30
+EXPONENTIAL_BACKOFF_BASE = 2
+REPO_ID_PATTERN = r'^[\w.-]+/[\w.-]+$'
+
 router = APIRouter()
 
 # -- Shared Helpers ---------------------------------------------------------
@@ -83,19 +97,19 @@ def retry_github(
         try:
             data = fn(owner, name, token=token)
             if not data:
-                raise HTTPException(404, f"{owner}/{name} not found on GitHub")
+                raise HTTPException(HTTP_STATUS_NOT_FOUND, f"{owner}/{name} not found on GitHub")
             if preserve:
                 data.update({k: preserve.get(k) for k in preserve})
             return data
         except GithubException as e:
             last_exc = e
-            if e.status == 403 and attempt < retries - 1:
+            if e.status == HTTP_STATUS_FORBIDDEN and attempt < retries - 1:
                 # Exponential backoff with jitter for rate limits
-                wait = min(2 ** attempt + random.uniform(0, 1), 30)
+                wait = min(EXPONENTIAL_BACKOFF_BASE ** attempt + random.uniform(0, 1), RATE_LIMIT_MAX_WAIT_SECONDS)
                 logging.warning(f"Rate limit, retrying in {wait:.1f}s...")
                 time.sleep(wait)
                 continue
-            if e.status == 404:
+            if e.status == HTTP_STATUS_NOT_FOUND:
                 raise repository_not_found(f"{owner}/{name}")
             break
         except Exception as e:
@@ -104,8 +118,8 @@ def retry_github(
             break
     # Handle final error based on type
     if isinstance(last_exc, GithubException):
-        if last_exc.status == 403:
-            raise github_api_error("GitHub API rate limit exceeded", 429)
+        if last_exc.status == HTTP_STATUS_FORBIDDEN:
+            raise github_api_error("GitHub API rate limit exceeded", HTTP_STATUS_TOO_MANY_REQUESTS)
         else:
             raise github_api_error(f"GitHub API error: {last_exc}")
     else:
@@ -127,15 +141,15 @@ def parse_owner_name(id: Optional[str], url: Optional[str]) -> Tuple[str, str]:
         HTTPException: 400 if neither id nor url is provided or invalid.
     """
     if id:
-        if not re.match(r'^[\w.-]+/[\w.-]+$', id):
-            raise HTTPException(400, "ID must be 'owner/name'")
+        if not re.match(REPO_ID_PATTERN, id):
+            raise HTTPException(HTTP_STATUS_BAD_REQUEST, "ID must be 'owner/name'")
         return id.split('/', 1)
     if url:
         res = validate_repo_url(url)
         if not res:
-            raise HTTPException(400, "Invalid GitHub URL")
+            raise HTTPException(HTTP_STATUS_BAD_REQUEST, "Invalid GitHub URL")
         return res
-    raise HTTPException(400, "Either 'id' or 'url' must be provided")
+    raise HTTPException(HTTP_STATUS_BAD_REQUEST, "Either 'id' or 'url' must be provided")
 
 
 def get_token(token: Optional[str] = None) -> Optional[str]:
@@ -231,7 +245,7 @@ def list_repositories(current_user: dict = Depends(get_current_user)):
         # Handle case where current_user is None (unauthenticated request)
         if not current_user:
             logging.warning("Unauthenticated request to list repositories")
-            raise HTTPException(status_code=401, detail="Authentication required")
+            raise HTTPException(status_code=HTTP_STATUS_UNAUTHORIZED, detail="Authentication required")
 
         if current_user.get("is_admin", False):
             # Admin users see all repositories
@@ -289,7 +303,7 @@ def check_repository(repo_id: str, current_user: dict = Depends(get_current_user
 )
 def add_repository(
     payload: RepositoryInput = Body(...),
-    max_retries: int = Query(3, description="Max retry attempts on rate limit."),
+    max_retries: int = Query(DEFAULT_MAX_RETRIES, description="Max retry attempts on rate limit."),
     current_user: dict = Depends(require_auth),
 ):
     """

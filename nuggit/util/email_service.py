@@ -17,20 +17,30 @@ from jinja2 import Environment, FileSystemLoader, Template
 
 logger = logging.getLogger(__name__)
 
+# Email Configuration Constants
+DEFAULT_SMTP_HOST = 'localhost'
+DEFAULT_SMTP_PORT = 587
+DEFAULT_FROM_EMAIL = 'noreply@nuggit.app'
+DEFAULT_FROM_NAME = 'Nuggit'
+DEFAULT_BASE_URL = 'http://localhost:5173'
+DEFAULT_SMTP_USE_TLS = 'true'
+DEFAULT_SMTP_USE_SSL = 'false'
+PASSWORD_RESET_EXPIRY_HOURS = 1
+
 
 class EmailConfig:
     """Email configuration settings."""
     
     def __init__(self):
-        self.smtp_host = os.getenv('SMTP_HOST', 'localhost')
-        self.smtp_port = int(os.getenv('SMTP_PORT', '587'))
+        self.smtp_host = os.getenv('SMTP_HOST', DEFAULT_SMTP_HOST)
+        self.smtp_port = int(os.getenv('SMTP_PORT', str(DEFAULT_SMTP_PORT)))
         self.smtp_username = os.getenv('SMTP_USERNAME', '')
         self.smtp_password = os.getenv('SMTP_PASSWORD', '')
-        self.smtp_use_tls = os.getenv('SMTP_USE_TLS', 'true').lower() == 'true'
-        self.smtp_use_ssl = os.getenv('SMTP_USE_SSL', 'false').lower() == 'true'
-        self.from_email = os.getenv('FROM_EMAIL', 'noreply@nuggit.app')
-        self.from_name = os.getenv('FROM_NAME', 'Nuggit')
-        self.base_url = os.getenv('BASE_URL', 'http://localhost:5173')
+        self.smtp_use_tls = os.getenv('SMTP_USE_TLS', DEFAULT_SMTP_USE_TLS).lower() == 'true'
+        self.smtp_use_ssl = os.getenv('SMTP_USE_SSL', DEFAULT_SMTP_USE_SSL).lower() == 'true'
+        self.from_email = os.getenv('FROM_EMAIL', DEFAULT_FROM_EMAIL)
+        self.from_name = os.getenv('FROM_NAME', DEFAULT_FROM_NAME)
+        self.base_url = os.getenv('BASE_URL', DEFAULT_BASE_URL)
         
     @property
     def is_configured(self) -> bool:
@@ -256,7 +266,7 @@ class EmailService:
             <p>Hello {username},</p>
             <p>You requested a password reset for your Nuggit account. Click the link below to reset your password:</p>
             <p><a href="{reset_url}">Reset Password</a></p>
-            <p>This link will expire in 1 hour. If you didn't request this reset, you can safely ignore this email.</p>
+            <p>This link will expire in {PASSWORD_RESET_EXPIRY_HOURS} hour. If you didn't request this reset, you can safely ignore this email.</p>
             <p>Best regards,<br>The Nuggit Team</p>
         </body>
         </html>
@@ -272,7 +282,7 @@ class EmailService:
         You requested a password reset for your Nuggit account. Visit this link to reset your password:
         {reset_url}
         
-        This link will expire in 1 hour. If you didn't request this reset, you can safely ignore this email.
+        This link will expire in {PASSWORD_RESET_EXPIRY_HOURS} hour. If you didn't request this reset, you can safely ignore this email.
         
         Best regards,
         The Nuggit Team

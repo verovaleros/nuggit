@@ -18,6 +18,12 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Database Configuration Constants
+DB_CONNECTION_TIMEOUT_SECONDS = 30
+DEFAULT_REPOSITORY_VERSION = 1
+VERSION_INCREMENT = 1
+MINIMUM_PENDING_MIGRATIONS = 0
+
 DB_PATH = Path(__file__).resolve().parent.parent / "nuggit.db"
 
 # Import connection pool for enhanced connection management
@@ -51,7 +57,7 @@ def get_connection():
         # Fallback to simple connection management
         conn = sqlite3.connect(
             DB_PATH,
-            timeout=30,
+            timeout=DB_CONNECTION_TIMEOUT_SECONDS,
             detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
         )
         conn.row_factory = sqlite3.Row
@@ -89,7 +95,7 @@ def initialize_database() -> None:
         # Check if we need to run migrations
         status = migration_manager.get_status()
 
-        if status['pending_count'] > 0:
+        if status['pending_count'] > MINIMUM_PENDING_MIGRATIONS:
             logger.info(f"Running {status['pending_count']} pending migrations...")
             applied = migration_manager.migrate()
             logger.info(f"Successfully applied migrations: {', '.join(applied)}")
@@ -136,7 +142,7 @@ def _legacy_initialize_database() -> None:
             tags TEXT,
             notes TEXT,
             last_synced TEXT,
-            version INTEGER DEFAULT 1,
+            version INTEGER DEFAULT {DEFAULT_REPOSITORY_VERSION},
             user_id INTEGER
         )
         """)
@@ -241,7 +247,7 @@ def _insert_or_update_repo_impl(repo_data: Dict[str, Any], user_id: Optional[int
     validated_data.setdefault('last_synced', timestamp)
 
     # Ensure version is set for new repositories
-    validated_data.setdefault('version', 1)
+    validated_data.setdefault('version', DEFAULT_REPOSITORY_VERSION)
 
     # Add user_id if provided (only for new repositories or when explicitly updating)
     if user_id is not None:
@@ -266,7 +272,7 @@ def _insert_or_update_repo_impl(repo_data: Dict[str, Any], user_id: Optional[int
         VALUES ({', '.join(f":{c}" for c in upsert_cols)})
         ON CONFLICT(id) DO UPDATE SET
         {', '.join(f"{c}=excluded.{c}" for c in upsert_cols if c not in ["id", "version"])},
-        version = version + 1
+        version = version + {VERSION_INCREMENT}
     """
 
     with get_connection() as conn:
@@ -517,7 +523,7 @@ def update_repository_fields(repo_id: str, fields: Dict[str, Any], expected_vers
     where_clause = "WHERE id = ?"
 
     if expected_version is not None:
-        set_clauses.append("version = version + 1")
+        set_clauses.append(f"version = version + {VERSION_INCREMENT}")
         where_clause += " AND version = ?"
 
     query_update = f"UPDATE repositories SET {', '.join(set_clauses)} {where_clause}"
@@ -531,7 +537,7 @@ def update_repository_fields(repo_id: str, fields: Dict[str, Any], expected_vers
 
         # Check version for optimistic locking
         if expected_version is not None:
-            current_version = existing.get('version', 1)
+            current_version = existing.get('version', DEFAULT_REPOSITORY_VERSION)
             if current_version != expected_version:
                 raise OptimisticLockError(
                     f"Version conflict: expected {expected_version}, got {current_version}"
@@ -739,7 +745,7 @@ def create_repository_version(repo_id: str, repo_info: Dict[str, Any]) -> int:
 
     # If there are versions from the same day, append a suffix
     if same_day_versions:
-        version_name = f"{version_name}.{len(same_day_versions) + 1}"
+        version_name = f"{version_name}.{len(same_day_versions) + VERSION_INCREMENT}"
 
     return add_version(
         repo_id=repo_id,
