@@ -267,12 +267,21 @@ def _insert_or_update_repo_impl(repo_data: Dict[str, Any], user_id: Optional[int
             (repo_id, field, old_value, new_value, changed_at)
         VALUES (?, ?, ?, ?, ?)
     """
+    # Build the update clauses, handling version increment explicitly
+    update_clauses = []
+    for c in upsert_cols:
+        if c not in ["id", "version"]:
+            update_clauses.append(f"{c}=excluded.{c}")
+
+    # Only increment version if it's in the upsert columns (meaning we're updating)
+    if "version" in upsert_cols:
+        update_clauses.append(f"version = version + {VERSION_INCREMENT}")
+
     query_upsert = f"""
         INSERT INTO repositories ({', '.join(upsert_cols)})
         VALUES ({', '.join(f":{c}" for c in upsert_cols)})
         ON CONFLICT(id) DO UPDATE SET
-        {', '.join(f"{c}=excluded.{c}" for c in upsert_cols if c not in ["id", "version"])},
-        version = version + {VERSION_INCREMENT}
+        {', '.join(update_clauses)}
     """
 
     with get_connection() as conn:
