@@ -26,6 +26,10 @@ MINIMUM_PENDING_MIGRATIONS = 0
 
 DB_PATH = Path(__file__).resolve().parent.parent / "nuggit.db"
 
+# Database health check configuration
+DB_HEALTH_CHECK_INTERVAL = 3600  # Check every hour
+LAST_HEALTH_CHECK = None
+
 # Import connection pool for enhanced connection management
 try:
     from nuggit.util.connection_pool import get_pooled_connection
@@ -54,14 +58,22 @@ def get_connection():
         with get_pooled_connection(DB_PATH) as conn:
             yield conn
     else:
-        # Fallback to simple connection management
+        # Fallback to simple connection management with corruption prevention
         conn = sqlite3.connect(
             DB_PATH,
             timeout=DB_CONNECTION_TIMEOUT_SECONDS,
             detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
         )
         conn.row_factory = sqlite3.Row
+
+        # Enhanced PRAGMA settings for corruption prevention
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")  # Write-Ahead Logging for better concurrency
+        conn.execute("PRAGMA synchronous = NORMAL")  # Balance between safety and performance
+        conn.execute("PRAGMA cache_size = -64000")  # 64MB cache
+        conn.execute("PRAGMA temp_store = MEMORY")  # Store temp tables in memory
+        conn.execute("PRAGMA mmap_size = 268435456")  # 256MB memory-mapped I/O
+
         try:
             yield conn
             conn.commit()
@@ -71,6 +83,125 @@ def get_connection():
         finally:
             conn.close()
 
+def check_database_integrity() -> List[str]:
+    """
+    Check database integrity and return list of issues.
+
+    Returns:
+        List[str]: List of integrity issues, empty if database is healthy
+    """
+    issues = []
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA integrity_check;")
+            results = cursor.fetchall()
+
+            for result in results:
+                issue = result[0]
+                if issue != "ok":
+                    issues.append(issue)
+                    logger.warning(f"Database integrity issue: {issue}")
+
+            if not issues:
+                logger.debug("Database integrity check passed")
+            else:
+                logger.error(f"Database integrity check failed with {len(issues)} issues")
+
+    except Exception as e:
+        error_msg = f"Failed to check database integrity: {e}"
+        logger.error(error_msg)
+        issues.append(error_msg)
+
+    return issues
+
+
+def perform_database_health_check() -> Dict[str, Any]:
+    """
+    Perform comprehensive database health check.
+
+    Returns:
+        Dict[str, Any]: Health check results
+    """
+    global LAST_HEALTH_CHECK
+
+    health_status = {
+        'timestamp': datetime.now().isoformat(),
+        'healthy': True,
+        'issues': [],
+        'warnings': [],
+        'stats': {}
+    }
+
+    try:
+        # Check integrity
+        integrity_issues = check_database_integrity()
+        if integrity_issues:
+            health_status['healthy'] = False
+            health_status['issues'].extend(integrity_issues)
+
+        # Check database size and growth
+        db_size = DB_PATH.stat().st_size if DB_PATH.exists() else 0
+        health_status['stats']['database_size_bytes'] = db_size
+        health_status['stats']['database_size_mb'] = round(db_size / (1024 * 1024), 2)
+
+        # Check WAL file size (if exists)
+        wal_path = DB_PATH.with_suffix('.db-wal')
+        if wal_path.exists():
+            wal_size = wal_path.stat().st_size
+            health_status['stats']['wal_size_bytes'] = wal_size
+            health_status['stats']['wal_size_mb'] = round(wal_size / (1024 * 1024), 2)
+
+            # Warn if WAL file is getting large
+            if wal_size > 100 * 1024 * 1024:  # 100MB
+                health_status['warnings'].append(f"WAL file is large: {health_status['stats']['wal_size_mb']}MB")
+
+        # Check table counts for basic sanity
+        with get_connection() as conn:
+            cursor = conn.cursor()
+
+            # Check if critical tables exist and have reasonable data
+            critical_tables = ['users', 'repositories']
+            for table in critical_tables:
+                try:
+                    cursor.execute(f"SELECT COUNT(*) FROM {table}")
+                    count = cursor.fetchone()[0]
+                    health_status['stats'][f'{table}_count'] = count
+                except Exception as e:
+                    health_status['issues'].append(f"Failed to count {table}: {e}")
+                    health_status['healthy'] = False
+
+        LAST_HEALTH_CHECK = datetime.now()
+
+        if health_status['healthy']:
+            logger.info("Database health check passed")
+        else:
+            logger.error(f"Database health check failed: {health_status['issues']}")
+
+    except Exception as e:
+        error_msg = f"Database health check failed: {e}"
+        logger.error(error_msg)
+        health_status['healthy'] = False
+        health_status['issues'].append(error_msg)
+
+    return health_status
+
+
+def auto_health_check() -> Optional[Dict[str, Any]]:
+    """
+    Automatically perform health check if enough time has passed.
+
+    Returns:
+        Optional[Dict[str, Any]]: Health check results if performed, None otherwise
+    """
+    global LAST_HEALTH_CHECK
+
+    now = datetime.now()
+    if (LAST_HEALTH_CHECK is None or
+        (now - LAST_HEALTH_CHECK).total_seconds() > DB_HEALTH_CHECK_INTERVAL):
+        return perform_database_health_check()
+
+    return None
 
 
 
