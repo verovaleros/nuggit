@@ -19,8 +19,8 @@ from datetime import datetime, timedelta
 logger = logging.getLogger(__name__)
 
 # SQLite configuration constants
-SQLITE_CACHE_SIZE = -64000  # 64MB cache (negative value means KB)
-SQLITE_MMAP_SIZE = 268435456  # 256MB memory-mapped I/O (256 * 1024 * 1024)
+SQLITE_CACHE_SIZE = -64 * 1024  # 64MB cache (negative value means KB)
+SQLITE_MMAP_SIZE = 256 * 1024 * 1024  # 256MB memory-mapped I/O
 
 
 @dataclass
