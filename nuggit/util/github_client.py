@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar('T')
 
 # Constants
-DEFAULT_RATE_LIMIT_RESET_TIME = 3600  # 1 hour in seconds
+DEFAULT_RATE_LIMIT_RESET_TIME = timedelta(hours=1).total_seconds()  # 1 hour in seconds
 
 
 class RateLimitType(Enum):
